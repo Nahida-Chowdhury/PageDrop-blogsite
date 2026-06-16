@@ -46,6 +46,8 @@ if ($search != '') {
 // FILTER
 if ($filter == "popular") {
     $sql .= " ORDER BY view_count DESC";
+} elseif ($filter == "recent") {
+    $sql .= " ORDER BY upload_time DESC";
 } else {
     $sql .= " ORDER BY upload_time DESC";
 }
@@ -73,9 +75,10 @@ $result = $conn->query($sql);
                 <div class="w-10 h-10 rounded-xl overflow-hidden">
                     <img src="logo.gif" class="w-full h-full object-cover">
                 </div>
-                <h1 class="text-2xl font-bold text-slate-800">PageDrop</h1>
+                <h1 class="text-2xl font-bold text-slate-800">
+                    <a href="index.php" class="hover:text-blue-600">PageDrop</a>
+                </h1>
             </div>
-
             <form method="GET" class="flex items-center gap-3">
 
                 <select name="filter"
@@ -122,7 +125,7 @@ $result = $conn->query($sql);
                 </h2>
 
                 <div class="flex justify-between text-sm text-gray-500 mb-6">
-                    <span>By <?= $viewBlog['author_name'] ?></span>
+                    <span>By <?= $viewBlog['author_name'] ?? 'Unknown' ?></span>
                     <span><?= $viewBlog['upload_time'] ?></span>
                 </div>
 
