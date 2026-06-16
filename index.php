@@ -2,7 +2,28 @@
 $conn = new mysqli("localhost", "root", "", "blog_site");
 if ($conn->connect_error) die("DB Connection Failed");
 
-// ---------------- VIEW BLOG ----------------
+/* ---------------- SEARCH SUGGESTIONS ---------------- */
+if (isset($_GET['suggest'])) {
+    $q = trim($conn->real_escape_string($_GET['suggest']));
+
+    $res = $conn->query("
+        SELECT title 
+        FROM blog 
+        WHERE title LIKE '%$q%' 
+        LIMIT 5
+    ");
+
+    $suggestions = [];
+    while ($row = $res->fetch_assoc()) {
+        $suggestions[] = $row['title'];
+    }
+
+    header('Content-Type: application/json');
+    echo json_encode($suggestions);
+    exit;
+}
+
+/* ---------------- VIEW BLOG ---------------- */
 $viewBlog = null;
 
 if (isset($_GET['view'])) {
@@ -20,11 +41,10 @@ if (isset($_GET['view'])) {
     ")->fetch_assoc();
 }
 
-// ---------------- FILTER + SEARCH ----------------
+/* ---------------- FILTER + SEARCH ---------------- */
 $filter = $_GET['filter'] ?? 'all';
 $search = trim($conn->real_escape_string($_GET['search'] ?? ''));
 
-// MAIN QUERY
 $sql = "
 SELECT blog.*, authors.name AS author_name
 FROM blog
@@ -33,7 +53,6 @@ ON blog.author_id = authors.author_id
 WHERE 1
 ";
 
-// SEARCH
 if ($search != '') {
     $sql .= "
     AND (
@@ -43,7 +62,6 @@ if ($search != '') {
     )";
 }
 
-// FILTER
 if ($filter == "popular") {
     $sql .= " ORDER BY view_count DESC";
 } elseif ($filter == "recent") {
@@ -59,158 +77,211 @@ $result = $conn->query($sql);
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PageDrop Blog</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PageDrop Blog</title>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+#suggestBox {
+    position: absolute;
+    background: white;
+    width: 260px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    z-index: 1000;
+}
+
+#suggestBox div {
+    padding: 8px;
+    cursor: pointer;
+}
+
+#suggestBox div:hover {
+    background: #f3f4f6;
+}
+
+.clear-btn {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer;
+    font-size: 18px;
+    color: gray;
+    display: none;
+}
+</style>
 </head>
 
 <body class="bg-slate-100 min-h-screen">
 
-    <!-- NAVBAR -->
-    <header class="bg-white shadow-sm border-b sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+<!-- NAVBAR -->
+<header class="bg-white shadow-sm border-b sticky top-0 z-50">
+<div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
 
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl overflow-hidden">
-                    <img src="logo.gif" class="w-full h-full object-cover">
-                </div>
-                <h1 class="text-2xl font-bold text-slate-800">
-                    <a href="index.php" class="hover:text-blue-600">PageDrop</a>
-                </h1>
-            </div>
-            <form method="GET" class="flex items-center gap-3">
-
-                <select name="filter"
-                    onchange="this.form.submit()"
-                    class="border px-3 py-2 rounded-lg text-sm">
-
-                    <option value="all" <?= $filter == 'all' ? 'selected' : '' ?>>All Blogs</option>
-                    <option value="recent" <?= $filter == 'recent' ? 'selected' : '' ?>>Recent</option>
-                    <option value="popular" <?= $filter == 'popular' ? 'selected' : '' ?>>Popular</option>
-
-                </select>
-
-                <input type="text"
-                    name="search"
-                    value="<?= htmlspecialchars($search) ?>"
-                    placeholder="Search blogs..."
-                    class="border px-3 py-2 rounded-lg w-64">
-
-                <button class="bg-blue-600 text-white px-4 py-2 rounded-lg">
-                    Search
-                </button>
-
-            </form>
-
+    <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl overflow-hidden">
+            <img src="logo.gif" class="w-full h-full object-cover">
         </div>
-    </header>
+        <h1 class="text-2xl font-bold text-slate-800">
+            <a href="index.php">PageDrop</a>
+        </h1>
+    </div>
 
-    <?php if ($viewBlog) { ?>
+    <form method="GET" class="flex items-center gap-3 relative">
 
-        <!-- FULL BLOG VIEW -->
-        <div class="max-w-4xl mx-auto my-8 bg-white rounded-2xl shadow-lg overflow-hidden">
+        <select name="filter"
+            onchange="this.form.submit()"
+            class="border px-3 py-2 rounded-lg text-sm">
 
-            <img src="uploads/<?= $viewBlog['cover_image'] ?>"
-                class="w-full h-[450px] object-cover">
+            <option value="all" <?= $filter == 'all' ? 'selected' : '' ?>>All Blogs</option>
+            <option value="recent" <?= $filter == 'recent' ? 'selected' : '' ?>>Recent</option>
+            <option value="popular" <?= $filter == 'popular' ? 'selected' : '' ?>>Popular</option>
 
-            <div class="p-8">
+        </select>
 
-                <h1 class="text-4xl font-bold mb-3">
-                    <?= $viewBlog['title'] ?>
-                </h1>
+        <!-- SEARCH BOX -->
+        <div style="position:relative;">
+            <input type="text"
+                id="searchInput"
+                name="search"
+                value="<?= htmlspecialchars($search) ?>"
+                placeholder="Search blogs..."
+                class="border px-3 py-2 rounded-lg w-64 pr-8">
 
-                <h2 class="text-xl text-gray-500 mb-4">
-                    <?= $viewBlog['subtitle'] ?>
-                </h2>
+            <span id="clearBtn" class="clear-btn">×</span>
 
-                <div class="flex justify-between text-sm text-gray-500 mb-6">
-                    <span>By <?= $viewBlog['author_name'] ?? 'Unknown' ?></span>
-                    <span><?= $viewBlog['upload_time'] ?></span>
-                </div>
-
-                <div class="text-gray-700 leading-8 whitespace-pre-line">
-                    <?= $viewBlog['content'] ?>
-                </div>
-
-                <div class="mt-6 text-sm text-gray-500">
-                    👁 <?= $viewBlog['view_count'] ?> Views
-                </div>
-
-                <a href="index.php"
-                    class="inline-block mt-6 bg-blue-600 text-white px-5 py-2 rounded-lg">
-                    ← Back to Blogs
-                </a>
-
-            </div>
+            <div id="suggestBox"></div>
         </div>
 
-    <?php } else { ?>
+        <button class="bg-blue-600 text-white px-4 py-2 rounded-lg">
+            Search
+        </button>
 
-        <!-- BLOG GRID -->
-        <div class="max-w-7xl mx-auto p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    </form>
 
-            <?php if ($result && $result->num_rows > 0) { ?>
+</div>
+</header>
 
-                <?php while ($row = $result->fetch_assoc()) { ?>
+<script>
+const input = document.getElementById("searchInput");
+const box = document.getElementById("suggestBox");
+const clearBtn = document.getElementById("clearBtn");
 
-                    <div class="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition">
+/* INPUT EVENT */
+input.addEventListener("input", function () {
 
-                        <img src="uploads/<?= $row['cover_image'] ?>"
-                            class="h-48 w-full object-cover">
+    clearBtn.style.display = this.value.length > 0 ? "block" : "none";
 
-                        <div class="p-5">
+    if (this.value.length < 1) {
+        box.innerHTML = "";
+        return;
+    }
 
-                            <span class="text-xs px-3 py-1 rounded-full bg-blue-100 text-blue-600">
-                                Blog
-                            </span>
+    fetch("?suggest=" + this.value)
+        .then(res => res.json())
+        .then(data => {
+            box.innerHTML = "";
 
-                            <h2 class="font-bold text-lg mt-2">
-                                <?= $row['title'] ?>
-                            </h2>
+            data.forEach(item => {
+                let div = document.createElement("div");
+                div.innerText = item;
 
-                            <p class="text-sm text-gray-500 mt-1">
-                                <?= $row['subtitle'] ?>
-                            </p>
+                div.onclick = function () {
+                    input.value = item;
+                    box.innerHTML = "";
+                    clearBtn.style.display = "block";
+                };
 
-                            <p class="text-xs text-gray-400 mt-2">
-                                By <?= $row['author_name'] ?? 'Unknown' ?>
-                            </p>
+                box.appendChild(div);
+            });
+        });
+});
 
-                            <div class="flex justify-between text-xs text-gray-400 mt-3">
-                                <span><?= $row['view_count'] ?> Views</span>
-                                <span><?= $row['upload_time'] ?></span>
-                            </div>
+/* CLEAR BUTTON */
+clearBtn.addEventListener("click", function () {
+    input.value = "";
+    box.innerHTML = "";
+    this.style.display = "none";
+    input.focus();
+});
+</script>
 
-                            <a href="?view=<?= $row['blog_id'] ?>"
-                                class="block mt-4 text-center bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">
-                                Read More
-                            </a>
+<?php if ($viewBlog) { ?>
 
-                        </div>
-                    </div>
+<!-- FULL BLOG VIEW -->
+<div class="max-w-4xl mx-auto my-8 bg-white rounded-2xl shadow-lg overflow-hidden">
 
-                <?php } ?>
+    <img src="uploads/<?= $viewBlog['cover_image'] ?>"
+        class="w-full h-[450px] object-cover">
 
-            <?php } else { ?>
+    <div class="p-8">
 
-                <p class="text-center text-gray-500 col-span-3">
-                    No blogs found 😢
-                </p>
+        <h1 class="text-4xl font-bold mb-3">
+            <?= $viewBlog['title'] ?>
+        </h1>
 
-            <?php } ?>
+        <h2 class="text-xl text-gray-500 mb-4">
+            <?= $viewBlog['subtitle'] ?>
+        </h2>
 
+        <div class="flex justify-between text-sm text-gray-500 mb-6">
+            <span>By <?= $viewBlog['author_name'] ?? 'Unknown' ?></span>
+            <span><?= $viewBlog['upload_time'] ?></span>
         </div>
 
-    <?php } ?>
-
-    <!-- FOOTER -->
-    <footer class="bg-white border-t mt-10">
-        <div class="max-w-7xl mx-auto py-5 text-center text-sm text-slate-500">
-            © 2026 PageDrop | Simple Blog System
+        <div class="text-gray-700 leading-8 whitespace-pre-line">
+            <?= $viewBlog['content'] ?>
         </div>
-    </footer>
+
+        <div class="mt-6 text-sm text-gray-500">
+            👁 <?= $viewBlog['view_count'] ?> Views
+        </div>
+
+        <a href="index.php"
+            class="inline-block mt-6 bg-blue-600 text-white px-5 py-2 rounded-lg">
+            ← Back to Blogs
+        </a>
+
+    </div>
+</div>
+
+<?php } else { ?>
+
+<!-- BLOG GRID -->
+<div class="max-w-7xl mx-auto p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+<?php while ($row = $result->fetch_assoc()) { ?>
+
+    <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+
+        <img src="uploads/<?= $row['cover_image'] ?>"
+            class="h-48 w-full object-cover">
+
+        <div class="p-5">
+
+            <h2 class="font-bold text-lg"><?= $row['title'] ?></h2>
+
+            <p class="text-sm text-gray-500"><?= $row['subtitle'] ?></p>
+
+            <p class="text-xs text-gray-400 mt-2">
+                By <?= $row['author_name'] ?? 'Unknown' ?>
+            </p>
+
+            <a href="?view=<?= $row['blog_id'] ?>"
+                class="block mt-4 text-center bg-blue-600 text-white py-2 rounded-lg">
+                Read More
+            </a>
+
+        </div>
+    </div>
+
+<?php } ?>
+
+</div>
+
+<?php } ?>
 
 </body>
-
 </html>
