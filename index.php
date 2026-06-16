@@ -9,27 +9,41 @@ if (isset($_GET['view'])) {
 
     $id = (int)$_GET['view'];
 
-    // increase view count
     $conn->query("UPDATE blog SET view_count = view_count + 1 WHERE blog_id = $id");
 
-    // get full blog
-    $viewBlog = $conn->query("SELECT * FROM blog WHERE blog_id = $id")->fetch_assoc();
+    $viewBlog = $conn->query("
+        SELECT blog.*, authors.name AS author_name
+        FROM blog
+        LEFT JOIN authors
+        ON blog.author_id = authors.author_id
+        WHERE blog.blog_id = $id
+    ")->fetch_assoc();
 }
 
 // ---------------- FILTER + SEARCH ----------------
 $filter = $_GET['filter'] ?? 'all';
-$search = $_GET['search'] ?? '';
+$search = trim($conn->real_escape_string($_GET['search'] ?? ''));
 
-$sql = "SELECT * FROM blog WHERE 1";
+// MAIN QUERY
+$sql = "
+SELECT blog.*, authors.name AS author_name
+FROM blog
+LEFT JOIN authors
+ON blog.author_id = authors.author_id
+WHERE 1
+";
 
+// SEARCH
 if ($search != '') {
-    $sql .= " AND (
-        title LIKE '%$search%' OR
-        subtitle LIKE '%$search%' OR
-        author_name LIKE '%$search%'
+    $sql .= "
+    AND (
+        blog.title LIKE '%$search%' OR
+        blog.subtitle LIKE '%$search%' OR
+        authors.name LIKE '%$search%'
     )";
 }
 
+// FILTER
 if ($filter == "popular") {
     $sql .= " ORDER BY view_count DESC";
 } else {
@@ -57,9 +71,7 @@ $result = $conn->query($sql);
 
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-xl overflow-hidden">
-                    <img src="logo.gif"
-                        alt="Logo"
-                        class="w-full h-full object-cover">
+                    <img src="logo.gif" class="w-full h-full object-cover">
                 </div>
                 <h1 class="text-2xl font-bold text-slate-800">PageDrop</h1>
             </div>
@@ -78,7 +90,7 @@ $result = $conn->query($sql);
 
                 <input type="text"
                     name="search"
-                    value="<?= $search ?>"
+                    value="<?= htmlspecialchars($search) ?>"
                     placeholder="Search blogs..."
                     class="border px-3 py-2 rounded-lg w-64">
 
@@ -135,43 +147,53 @@ $result = $conn->query($sql);
         <!-- BLOG GRID -->
         <div class="max-w-7xl mx-auto p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
-            <?php while ($row = $result->fetch_assoc()) { ?>
+            <?php if ($result && $result->num_rows > 0) { ?>
 
-                <div class="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition">
+                <?php while ($row = $result->fetch_assoc()) { ?>
 
-                    <img src="uploads/<?= $row['cover_image'] ?>"
-                        class="h-48 w-full object-cover">
+                    <div class="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition">
 
-                    <div class="p-5">
+                        <img src="uploads/<?= $row['cover_image'] ?>"
+                            class="h-48 w-full object-cover">
 
-                        <span class="text-xs px-3 py-1 rounded-full bg-blue-100 text-blue-600">
-                            Blog
-                        </span>
+                        <div class="p-5">
 
-                        <h2 class="font-bold text-lg mt-2">
-                            <?= $row['title'] ?>
-                        </h2>
+                            <span class="text-xs px-3 py-1 rounded-full bg-blue-100 text-blue-600">
+                                Blog
+                            </span>
 
-                        <p class="text-sm text-gray-500 mt-1">
-                            <?= $row['subtitle'] ?>
-                        </p>
+                            <h2 class="font-bold text-lg mt-2">
+                                <?= $row['title'] ?>
+                            </h2>
 
-                        <p class="text-xs text-gray-400 mt-2">
-                            By <?= $row['author_name'] ?>
-                        </p>
+                            <p class="text-sm text-gray-500 mt-1">
+                                <?= $row['subtitle'] ?>
+                            </p>
 
-                        <div class="flex justify-between text-xs text-gray-400 mt-3">
-                            <span><?= $row['view_count'] ?> Views</span>
-                            <span><?= $row['upload_time'] ?></span>
+                            <p class="text-xs text-gray-400 mt-2">
+                                By <?= $row['author_name'] ?? 'Unknown' ?>
+                            </p>
+
+                            <div class="flex justify-between text-xs text-gray-400 mt-3">
+                                <span><?= $row['view_count'] ?> Views</span>
+                                <span><?= $row['upload_time'] ?></span>
+                            </div>
+
+                            <a href="?view=<?= $row['blog_id'] ?>"
+                                class="block mt-4 text-center bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">
+                                Read More
+                            </a>
+
                         </div>
-
-                        <a href="?view=<?= $row['blog_id'] ?>"
-                            class="block mt-4 text-center bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">
-                            Read More
-                        </a>
-
                     </div>
-                </div>
+
+                <?php } ?>
+
+            <?php } else { ?>
+
+                <p class="text-center text-gray-500 col-span-3">
+                    No blogs found 😢
+                </p>
 
             <?php } ?>
 
