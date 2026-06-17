@@ -229,17 +229,33 @@ if ($authors_result) {
 }
 
 $search = isset($_GET['search']) ? $conn->real_escape_string($_GET['search']) : '';
+
+// ---------------- PAGINATION SETUP FOR ADMIN FEED ----------------
+$limit = 8; // Number of blog entries per page
+$current_page = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
+$offset = ($current_page - 1) * $limit;
+
+// Formulate base search conditions
+$where_clause = " WHERE 1";
+if ($search != '') {
+    $where_clause .= " AND (blog.title LIKE '%$search%' OR blog.subtitle LIKE '%$search%' OR authors.name LIKE '%$search%')";
+}
+
+// Count total matching items
+$count_sql = "SELECT COUNT(*) as total FROM blog LEFT JOIN authors ON blog.author_id = authors.author_id" . $where_clause;
+$count_res = $conn->query($count_sql);
+$total_rows = $count_res ? $count_res->fetch_assoc()['total'] : 0;
+$total_pages = ceil($total_rows / $limit);
+
+// Build targeted query statement
 $sql = "
     SELECT blog.*, authors.name AS author_name 
     FROM blog 
     LEFT JOIN authors ON blog.author_id = authors.author_id 
-    WHERE 1
+    $where_clause
+    ORDER BY blog.upload_time DESC
+    LIMIT $limit OFFSET $offset
 ";
-
-if ($search != '') {
-    $sql .= " AND (blog.title LIKE '%$search%' OR blog.subtitle LIKE '%$search%' OR authors.name LIKE '%$search%')";
-}
-$sql .= " ORDER BY blog.upload_time DESC";
 $result = $conn->query($sql);
 
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
@@ -631,6 +647,51 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
                     <p class="text-slate-400 italic text-center col-span-full py-12 text-sm">No documents found matching criteria.</p>
                 <?php } ?>
             </div>
+
+            <?php if ($total_pages > 1): ?>
+                <div class="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-4 sm:px-6 rounded-2xl shadow-xs mt-6">
+                    <div class="flex flex-1 justify-between sm:hidden">
+                        <?php if ($current_page > 1): ?>
+                            <a href="?p=<?= $current_page - 1 ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Previous</a>
+                        <?php else: ?>
+                            <div></div>
+                        <?php endif; ?>
+                        <?php if ($current_page < $total_pages): ?>
+                            <a href="?p=<?= $current_page + 1 ?>&search=<?= urlencode($search) ?>" class="relative ml-3 inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Next</a>
+                        <?php endif; ?>
+                    </div>
+                    <div class="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+                        <div>
+                            <p class="text-sm text-slate-700">
+                                Showing <span class="font-semibold"><?= $offset + 1 ?></span> to <span class="font-semibold"><?= min($offset + $limit, $total_rows) ?></span> of <span class="font-semibold"><?= $total_rows ?></span> results
+                            </p>
+                        </div>
+                        <div>
+                            <nav class="isolate inline-flex -space-x-px rounded-xl shadow-xs gap-1" aria-label="Pagination">
+                                <?php if ($current_page > 1): ?>
+                                    <a href="?p=<?= $current_page - 1 ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl px-2 py-2 text-slate-400 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 focus:z-20">
+                                        <span class="sr-only">Previous</span>
+                                        &larr;
+                                    </a>
+                                <?php endif; ?>
+
+                                <?php for ($i = 1; $i <= $total_pages; $i++): ?>
+                                    <a href="?p=<?= $i ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl px-4 py-2 text-sm font-semibold <?= $i === $current_page ? 'bg-blue-600 text-white focus:z-20' : 'text-slate-900 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 focus:z-20' ?>">
+                                        <?= $i ?>
+                                    </a>
+                                <?php endfor; ?>
+
+                                <?php if ($current_page < $total_pages): ?>
+                                    <a href="?p=<?= $current_page + 1 ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl px-2 py-2 text-slate-400 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 focus:z-20">
+                                        <span class="sr-only">Next</span>
+                                        &rarr;
+                                    </a>
+                                <?php endif; ?>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
         </main>
     </div>
 

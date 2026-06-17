@@ -100,20 +100,18 @@ if (isset($_GET['subject'])) {
     $contact_subject_prefill = htmlspecialchars($_GET['subject']);
 }
 
-/* ---------------- FILTER + SEARCH ---------------- */
+/* ---------------- FILTER + SEARCH + PAGINATION ---------------- */
 $filter = $_GET['filter'] ?? 'all';
 $search = trim($conn->real_escape_string($_GET['search'] ?? ''));
 
-$sql = "
-SELECT blog.*, authors.name AS author_name
-FROM blog
-LEFT JOIN authors
-ON blog.author_id = authors.author_id
-WHERE 1
-";
+// Setup Pagination Variables
+$limit = 8; // Number of blogs shown per page
+$current_page = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
+$offset = ($current_page - 1) * $limit;
 
+$where_clause = " WHERE 1";
 if ($search != '') {
-    $sql .= "
+    $where_clause .= "
     AND (
         blog.title LIKE '%$search%' OR
         blog.subtitle LIKE '%$search%' OR
@@ -121,13 +119,29 @@ if ($search != '') {
     )";
 }
 
+// Calculate the total rows matching this specific filter configuration
+$count_sql = "SELECT COUNT(*) as total FROM blog LEFT JOIN authors ON blog.author_id = authors.author_id" . $where_clause;
+$count_res = $conn->query($count_sql);
+$total_rows = $count_res ? $count_res->fetch_assoc()['total'] : 0;
+$total_pages = ceil($total_rows / $limit);
+
+// Handle ordering directives
+$order_clause = " ORDER BY upload_time DESC";
 if ($filter == "popular") {
-    $sql .= " ORDER BY view_count DESC";
+    $order_clause = " ORDER BY view_count DESC";
 } elseif ($filter == "recent") {
-    $sql .= " ORDER BY upload_time DESC";
-} else {
-    $sql .= " ORDER BY upload_time DESC";
+    $order_clause = " ORDER BY upload_time DESC";
 }
+
+$sql = "
+SELECT blog.*, authors.name AS author_name
+FROM blog
+LEFT JOIN authors
+ON blog.author_id = authors.author_id
+$where_clause
+$order_clause
+LIMIT $limit OFFSET $offset
+";
 
 $result = $conn->query($sql);
 ?>
@@ -334,53 +348,63 @@ $result = $conn->query($sql);
                 </div>
             </main>
 
-        <?php else: ?>
-            <section class="bg-slate-900 text-white py-28 sm:py-36 relative overflow-hidden border-b border-slate-800/80">
-                <div class="absolute top-1/2 left-1/4 -translate-y-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+<?php else: ?>
+            <?php 
+            // Detect if the user explicitly interacted with pagination or filters
+            $has_clicked_pagination = isset($_GET['p']);
+            $has_clicked_filter = isset($_GET['filter']);
 
-                <div class="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-16 items-center relative z-10">
-                    <div class="space-y-8">
-                        <span class="bg-blue-500/10 text-blue-400 text-xs font-bold uppercase tracking-widest px-3.5 py-2 rounded-full border border-blue-500/20 shadow-xs">
-                            <?= htmlspecialchars($hero_badge) ?>
-                        </span>
-                        <h2 class="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-[1.1]">
-                            <?= htmlspecialchars($hero_title) ?>
-                        </h2>
-                        <p class="text-slate-400 text-base sm:text-lg leading-relaxed max-w-lg">
-                            <?= htmlspecialchars($hero_subtitle) ?>
-                        </p>
-                        <div class="flex items-center gap-5 pt-2">
-                            <a href="#articles" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-7 py-3.5 rounded-xl transition shadow-md hover:shadow-blue-600/20 hover:-translate-y-0.5 transform duration-150">
-                                Explore Articles
-                            </a>
-                            <a href="index.php?page=about" class="text-slate-300 hover:text-white text-sm font-semibold transition flex items-center gap-1.5 group">
-                                Learn More <span class="group-hover:translate-x-1 transition-transform">&rarr;</span>
-                            </a>
-                        </div>
-                    </div>
+            // ONLY show the massive Hero block if the user just arrived at the site 
+            // (No search keyword, and they haven't explicitly clicked a page or filter button)
+            if (empty($search) && !$has_clicked_pagination && !$has_clicked_filter): 
+            ?>
+                <section class="bg-slate-900 text-white py-28 sm:py-36 relative overflow-hidden border-b border-slate-800/80">
+                    <div class="absolute top-1/2 left-1/4 -translate-y-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
-                    <div class="hidden md:block bg-slate-950/60 border border-slate-800/80 rounded-3xl p-7 shadow-2xl backdrop-blur-xs max-w-lg justify-self-end w-full">
-                        <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-5">
-                            <div class="flex items-center gap-2">
-                                <span class="w-3 h-3 rounded-full bg-red-500/80"></span>
-                                <span class="w-3 h-3 rounded-full bg-yellow-500/80"></span>
-                                <span class="w-3 h-3 rounded-full bg-green-500/80"></span>
+                    <div class="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-16 items-center relative z-10">
+                        <div class="space-y-8">
+                            <span class="bg-blue-500/10 text-blue-400 text-xs font-bold uppercase tracking-widest px-3.5 py-2 rounded-full border border-blue-500/20 shadow-xs">
+                                <?= htmlspecialchars($hero_badge) ?>
+                            </span>
+                            <h2 class="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-[1.1]">
+                                <?= htmlspecialchars($hero_title) ?>
+                            </h2>
+                            <p class="text-slate-400 text-base sm:text-lg leading-relaxed max-w-lg">
+                                <?= htmlspecialchars($hero_subtitle) ?>
+                            </p>
+                            <div class="flex items-center gap-5 pt-2">
+                                <a href="#articles" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-7 py-3.5 rounded-xl transition shadow-md hover:shadow-blue-600/20 hover:-translate-y-0.5 transform duration-150">
+                                    Explore Articles
+                                </a>
+                                <a href="index.php?page=about" class="text-slate-300 hover:text-white text-sm font-semibold transition flex items-center gap-1.5 group">
+                                    Learn More <span class="group-hover:translate-x-1 transition-transform">&rarr;</span>
+                                </a>
                             </div>
-                            <span class="text-xs font-mono text-slate-500">pagedrop_core.json</span>
                         </div>
-                        <pre class="text-xs sm:text-sm font-mono text-slate-300 leading-relaxed overflow-x-auto"><code>{
-                            <span class="text-blue-400">"status"</span>: <span class="text-emerald-400">"Operational"</span>,
-                            <span class="text-blue-400">"database"</span>: <span class="text-emerald-400">"Connected"</span>,
-                            <span class="text-blue-400">"encryption"</span>: <span class="text-emerald-400">"AES-256"</span>,
-                            <span class="text-blue-400">"cdn_nodes"</span>: [
-                                <span class="text-indigo-400">"Edge_Global_01"</span>,
-                                <span class="text-indigo-400">"Edge_Global_02"</span>
-                            ],
-                            <span class="text-blue-400">"cache_hit_rate"</span>: <span class="text-amber-400">"99.4%"</span>
-                        }</code></pre>
+
+                        <div class="hidden md:block bg-slate-950/60 border border-slate-800/80 rounded-3xl p-7 shadow-2xl backdrop-blur-xs max-w-lg justify-self-end w-full">
+                            <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-3 h-3 rounded-full bg-red-500/80"></span>
+                                    <span class="w-3 h-3 rounded-full bg-yellow-500/80"></span>
+                                    <span class="w-3 h-3 rounded-full bg-green-500/80"></span>
+                                </div>
+                                <span class="text-xs font-mono text-slate-500">pagedrop_core.json</span>
+                            </div>
+                            <pre class="text-xs sm:text-sm font-mono text-slate-300 leading-relaxed overflow-x-auto"><code>{
+                                <span class="text-blue-400">"status"</span>: <span class="text-emerald-400">"Operational"</span>,
+                                <span class="text-blue-400">"database"</span>: <span class="text-emerald-400">"Connected"</span>,
+                                <span class="text-blue-400">"encryption"</span>: <span class="text-emerald-400">"AES-256"</span>,
+                                <span class="text-blue-400">"cdn_nodes"</span>: [
+                                    <span class="text-indigo-400">"Edge_Global_01"</span>,
+                                    <span class="text-indigo-400">"Edge_Global_02"</span>
+                                ],
+                                <span class="text-blue-400">"cache_hit_rate"</span>: <span class="text-amber-400">"99.4%"</span>
+                            }</code></pre>
+                        </div>
                     </div>
-                </div>
-            </section>
+                </section>
+            <?php endif; ?>
 
             <main id="articles" class="max-w-7xl mx-auto p-6 space-y-6 scroll-mt-20">
                 <?php if ($search != ''): ?>
@@ -435,6 +459,51 @@ $result = $conn->query($sql);
                     }
                     ?>
                 </div>
+
+                <?php if ($total_pages > 1): ?>
+                    <div class="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-4 sm:px-6 rounded-2xl shadow-xs mt-6">
+                        <div class="flex flex-1 justify-between sm:hidden">
+                            <?php if ($current_page > 1): ?>
+                                <a href="?p=<?= $current_page - 1 ?>&filter=<?= $filter ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Previous</a>
+                            <?php else: ?>
+                                <div></div>
+                            <?php endif; ?>
+                            <?php if ($current_page < $total_pages): ?>
+                                <a href="?p=<?= $current_page + 1 ?>&filter=<?= $filter ?>&search=<?= urlencode($search) ?>" class="relative ml-3 inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Next</a>
+                            <?php endif; ?>
+                        </div>
+                        <div class="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+                            <div>
+                                <p class="text-sm text-slate-700">
+                                    Showing <span class="font-semibold"><?= $offset + 1 ?></span> to <span class="font-semibold"><?= min($offset + $limit, $total_rows) ?></span> of <span class="font-semibold"><?= $total_rows ?></span> results
+                                </p>
+                            </div>
+                            <div>
+                                <nav class="isolate inline-flex -space-x-px rounded-xl shadow-xs gap-1" aria-label="Pagination">
+                                    <?php if ($current_page > 1): ?>
+                                        <a href="?p=<?= $current_page - 1 ?>&filter=<?= $filter ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl px-2 py-2 text-slate-400 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 focus:z-20">
+                                            <span class="sr-only">Previous</span>
+                                            &larr;
+                                        </a>
+                                    <?php endif; ?>
+
+                                    <?php for ($i = 1; $i <= $total_pages; $i++): ?>
+                                        <a href="?p=<?= $i ?>&filter=<?= $filter ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl px-4 py-2 text-sm font-semibold <?= $i === $current_page ? 'bg-blue-600 text-white focus:z-20' : 'text-slate-900 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 focus:z-20' ?>">
+                                            <?= $i ?>
+                                        </a>
+                                    <?php endfor; ?>
+
+                                    <?php if ($current_page < $total_pages): ?>
+                                        <a href="?p=<?= $current_page + 1 ?>&filter=<?= $filter ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl px-2 py-2 text-slate-400 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 focus:z-20">
+                                            <span class="sr-only">Next</span>
+                                            &rarr;
+                                        </a>
+                                    <?php endif; ?>
+                                </nav>
+                            </div>
+                        </div>
+                    </div>
+                <?php endif; ?>
             </main>
 
         <?php endif; ?>
