@@ -22,7 +22,7 @@ if (isset($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true
 
     // Fetch the token and expiration from the database
     $token_check = $conn->query("SELECT session_token, token_expires_at FROM admins WHERE username = '$current_user'");
-    
+
     if ($token_check && $token_check->num_rows > 0) {
         $admin_db_data = $token_check->fetch_assoc();
         $db_token = $admin_db_data['session_token'];
@@ -37,8 +37,8 @@ if (isset($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true
             header("Location: admin?err=timeout");
             exit;
         } else {
-            // OPTIONAL/RECOMMENDED: Refresh the 30-minute window on active page movement
-            $new_expiration = date('Y-m-d H:i:s', strtotime('+30 minutes'));
+            // Refresh the 30-minute window on active page movement
+            $new_expiration = date('Y-m-d H:i:s', strtotime('+30  minutes'));
             $conn->query("UPDATE admins SET token_expires_at = '$new_expiration' WHERE username = '$current_user'");
         }
     } else {
@@ -57,22 +57,22 @@ if (isset($_POST['admin_login_trigger'])) {
         $admin_res = $conn->query("SELECT * FROM admins WHERE username = '$username'");
         if ($admin_res && $admin_res->num_rows > 0) {
             $admin_data = $admin_res->fetch_assoc();
-            
-            if (password_verify($password, $admin_data['password']) || $password === 'password123') { 
-                
+
+            if (password_verify($password, $admin_data['password']) || $password === 'password123') {
+
                 // 1. Generate a secure, pseudo-random cryptographic token
                 $generated_token = bin2hex(random_bytes(32));
                 // 2. Set strict expiration time exactly 30 minutes out
-                $expires_at = date('Y-m-d H:i:s', strtotime('+30 minutes'));
-                
+                $expires_at = date('Y-m-d H:i:s', strtotime('+30  minutes'));
+
                 // 3. Save token parameters directly back to the admin table row
                 $conn->query("UPDATE admins SET session_token = '$generated_token', token_expires_at = '$expires_at' WHERE username = '$username'");
 
                 $_SESSION['admin_logged_in'] = true;
                 $_SESSION['admin_username'] = $admin_data['username'];
                 $_SESSION['admin_token'] = $generated_token; // Store token inside user session context
-                
-                header("Location: admin"); 
+
+                header("Location: admin");
                 exit;
             } else {
                 header("Location: admin?err=1");
@@ -94,7 +94,23 @@ if (isset($_GET['logout'])) {
         $conn->query("UPDATE admins SET session_token = NULL, token_expires_at = NULL WHERE username = '$current_user'");
     }
     session_destroy();
-    header("Location: admin"); 
+    header("Location: admin");
+    exit;
+}
+
+// ---------------- SAVE DYNAMIC SITE SETTINGS CONTENT ----------------
+if (isset($_POST['save_settings_trigger'])) {
+    foreach ($_POST['meta'] as $key => $value) {
+        $safe_key = $conn->real_escape_string($key);
+        $safe_value = $conn->real_escape_string($value);
+
+        $conn->query("
+            INSERT INTO site_settings (meta_key, meta_value) 
+            VALUES ('$safe_key', '$safe_value')
+            ON DUPLICATE KEY UPDATE meta_value = '$safe_value'
+        ");
+    }
+    header("Location: admin?action=settings&success=1");
     exit;
 }
 
@@ -114,13 +130,21 @@ if (isset($_POST['remove_author_trigger'])) {
     $remove_author_id = (int)$_POST['remove_author_id'];
     $conn->query("UPDATE blog SET author_id = 0 WHERE author_id = $remove_author_id");
     $conn->query("DELETE FROM authors WHERE author_id = $remove_author_id");
-    
+
     $redirect_url = isset($_POST['current_blog_id']) && $_POST['current_blog_id'] != '' ? "admin?edit=" . $_POST['current_blog_id'] : "admin?action=create";
     header("Location: " . $redirect_url);
     exit;
 }
 
-// ---------------- CREATE / UPDATE ----------------
+// ---------------- DELETE CONTACT MESSAGE ----------------
+if (isset($_GET['delete_msg'])) {
+    $msg_id = (int)$_GET['delete_msg'];
+    $conn->query("DELETE FROM contact_messages WHERE id = $msg_id");
+    header("Location: admin?action=messages");
+    exit;
+}
+
+// ---------------- CREATE / UPDATE BLOGS ----------------
 if (isset($_POST['save'])) {
     $id = $conn->real_escape_string($_POST['blog_id']);
     $author_id = (int)($_POST['author_id'] ?? 0);
@@ -133,13 +157,13 @@ if (isset($_POST['save'])) {
         foreach ($_FILES['cover_images']['name'] as $key => $val) {
             $imageName = $_FILES['cover_images']['name'][$key];
             $tmp = $_FILES['cover_images']['tmp_name'][$key];
-            
+
             if (move_uploaded_file($tmp, "uploads/" . $imageName)) {
                 $uploaded_images[] = $imageName;
             }
         }
     }
-    
+
     $images_string = implode(',', $uploaded_images);
 
     if ($id == "") {
@@ -154,7 +178,7 @@ if (isset($_POST['save'])) {
     }
 
     $conn->query($sql);
-    header("Location: admin"); 
+    header("Location: admin");
     exit;
 }
 
@@ -162,20 +186,25 @@ if (isset($_POST['save'])) {
 if (isset($_GET['delete'])) {
     $id = (int)$_GET['delete'];
     $conn->query("DELETE FROM blog WHERE blog_id=$id");
-    header("Location: admin"); 
+    header("Location: admin");
     exit;
 }
 
 $edit = null;
 $showFormPage = false;
+$showSettingsPage = false;
+$showMessagesPage = false;
+
 if (isset($_GET['edit'])) {
     $id = (int)$_GET['edit'];
     $edit = $conn->query("SELECT * FROM blog WHERE blog_id=$id")->fetch_assoc();
     $showFormPage = true;
 }
 
-if (isset($_GET['action']) && $_GET['action'] == 'create') {
-    $showFormPage = true;
+if (isset($_GET['action'])) {
+    if ($_GET['action'] == 'create') $showFormPage = true;
+    if ($_GET['action'] == 'settings') $showSettingsPage = true;
+    if ($_GET['action'] == 'messages') $showMessagesPage = true;
 }
 
 // ---------------- VIEW ----------------
@@ -215,37 +244,40 @@ $result = $conn->query($sql);
 
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Sign In - PageDrop</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-900 flex items-center justify-center min-h-screen">
-    <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md mx-4">
-        <div class="text-center mb-8">
-            <h1 class="text-3xl font-extrabold text-blue-600 tracking-tight">PageDrop</h1>
-            <p class="text-gray-500 mt-2 font-medium">Administration Portal</p>
-            <?php if (!empty($error_message)): ?>
-                <p class="text-xs font-bold text-red-500 mt-3 bg-red-50 p-2.5 rounded-lg border border-red-200"><?= htmlspecialchars($error_message) ?></p>
-            <?php endif; ?>
+    <!DOCTYPE html>
+    <html lang="en">
+
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Admin Sign In - PageDrop</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+
+    <body class="bg-slate-900 flex items-center justify-center min-h-screen">
+        <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md mx-4">
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-extrabold text-blue-600 tracking-tight">PageDrop</h1>
+                <p class="text-gray-500 mt-2 font-medium">Administration Portal</p>
+                <?php if (!empty($error_message)): ?>
+                    <p class="text-xs font-bold text-red-500 mt-3 bg-red-50 p-2.5 rounded-lg border border-red-200"><?= htmlspecialchars($error_message) ?></p>
+                <?php endif; ?>
+            </div>
+            <form method="POST" action="admin" class="space-y-5" autocomplete="off">
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1">Username</label>
+                    <input type="text" name="adm_user" required placeholder="Enter admin username" autocomplete="off" class="w-full border border-gray-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1">Password</label>
+                    <input type="password" name="adm_pass" required placeholder="••••••••" autocomplete="new-password" class="w-full border border-gray-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <button type="submit" name="admin_login_trigger" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold p-3 rounded-xl shadow-md transition">Sign In Dashboard</button>
+            </form>
         </div>
-        <form method="POST" action="admin" class="space-y-5" autocomplete="off">
-            <div>
-                <label class="block text-sm font-semibold text-gray-700 mb-1">Username</label>
-                <input type="text" name="adm_user" required placeholder="Enter admin username" autocomplete="off" class="w-full border border-gray-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none">
-            </div>
-            <div>
-                <label class="block text-sm font-semibold text-gray-700 mb-1">Password</label>
-                <input type="password" name="adm_pass" required placeholder="••••••••" autocomplete="new-password" class="w-full border border-gray-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none">
-            </div>
-            <button type="submit" name="admin_login_trigger" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold p-3 rounded-xl shadow-md transition">Sign In Dashboard</button>
-        </form>
-    </div>
-</body>
-</html>
+    </body>
+
+    </html>
 <?php
     exit;
 }
@@ -253,16 +285,18 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - PageDrop</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
+
 <body class="bg-slate-50 min-h-screen font-sans flex flex-col justify-between text-slate-800">
 
     <header class="bg-slate-900 text-white shadow-md sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex flex-wrap justify-between items-center gap-4 sm:gap-0">
             <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-xl overflow-hidden ring-2 ring-blue-500/30">
                     <img src="../logo.gif" class="w-full h-full object-cover">
@@ -271,8 +305,12 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
                     PageDrop <span class="text-xs font-semibold bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded ml-2 border border-blue-500/30">ADMIN</span>
                 </a>
             </div>
-            <div class="flex items-center gap-4">
-                <span class="text-sm text-slate-300 hidden sm:inline">Active: <strong class="text-white"><?= htmlspecialchars($_SESSION['admin_username']) ?></strong></span>
+            <div class="flex flex-wrap items-center gap-3 sm:gap-4">
+                <span class="text-sm text-slate-300 hidden md:inline">Active: <strong class="text-white"><?= htmlspecialchars($_SESSION['admin_username']) ?></strong></span>
+
+                <a href="admin" class="text-xs font-bold px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 transition">📝 Blogs Feed</a>
+                <a href="?action=messages" class="text-xs font-bold px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 transition">📥 Inbox Messages</a>
+                <a href="?action=settings" class="text-xs font-bold px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 transition">⚙️ Site Settings</a>
                 <a href="?action=create" class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-1.5">
                     <span>✨</span> Create Blog
                 </a>
@@ -288,9 +326,9 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
                     <a href="admin?search=<?= urlencode($search) ?>" class="inline-flex items-center text-sm font-semibold text-blue-600 hover:text-blue-700 transition">← Back to Overview</a>
                 </div>
                 <article class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                    <?php if(!empty($viewBlog['cover_image'])): $imgs = explode(',', $viewBlog['cover_image']); ?>
+                    <?php if (!empty($viewBlog['cover_image'])): $imgs = explode(',', $viewBlog['cover_image']); ?>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 p-4 bg-slate-100 border-b">
-                            <?php foreach($imgs as $img): ?>
+                            <?php foreach ($imgs as $img): ?>
                                 <div class="overflow-hidden bg-white rounded-xl h-64">
                                     <img src="../uploads/<?= htmlspecialchars(trim($img)) ?>" class="w-full h-full object-cover">
                                 </div>
@@ -303,16 +341,135 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
                     </div>
                 </article>
             </main>
-            <?php exit; } ?>
+        <?php exit;
+        } ?>
+
+        <?php if ($showSettingsPage) {
+            // Query dynamic text values currently registered
+            $curr_settings = [];
+            $set_res = $conn->query("SELECT meta_key, meta_value FROM site_settings");
+            if ($set_res) {
+                while ($s_row = $set_res->fetch_assoc()) {
+                    $curr_settings[$s_row['meta_key']] = $s_row['meta_value'];
+                }
+            }
+        ?>
+            <main class="max-w-3xl mx-auto px-4 py-10">
+                <div class="bg-white p-8 sm:p-10 rounded-3xl border border-slate-200 shadow-xl space-y-6">
+                    <div>
+                        <h2 class="font-extrabold text-2xl text-slate-900 tracking-tight">⚙️ Core Website Text Configurations</h2>
+                        <p class="text-sm text-slate-400 mt-1">Directly overwrite values displayed dynamically on the main Landing Hero and About layout sections.</p>
+                    </div>
+
+                    <?php if (isset($_GET['success'])): ?>
+                        <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-semibold p-4 rounded-xl">
+                            🎉 Application state updated! New text matrix parameters compiled successfully.
+                        </div>
+                    <?php endif; ?>
+
+                    <form method="POST" action="admin?action=settings" class="space-y-6">
+
+                        <div class="border-b pb-6 space-y-4">
+                            <h3 class="text-xs font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-3 py-1.5 rounded-lg inline-block">Landing Hero Area</h3>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Small Text Badge</label>
+                                <input type="text" name="meta[hero_badge]" value="<?= htmlspecialchars($curr_settings['hero_badge'] ?? 'Welcome to PageDrop') ?>" required class="w-full bg-slate-50 border border-slate-200 p-3 text-sm rounded-xl outline-none focus:border-blue-500 transition">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Main Catchy Title Headline</label>
+                                <input type="text" name="meta[hero_title]" value="<?= htmlspecialchars($curr_settings['hero_title'] ?? '') ?>" required class="w-full bg-slate-50 border border-slate-200 p-3 text-sm rounded-xl outline-none focus:border-blue-500 transition">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Subtext Description Text block</label>
+                                <textarea name="meta[hero_subtitle]" rows="3" required class="w-full bg-slate-50 border border-slate-200 p-3 text-sm rounded-xl outline-none focus:border-blue-500 transition resize-none"><?= htmlspecialchars($curr_settings['hero_subtitle'] ?? '') ?></textarea>
+                            </div>
+                        </div>
+
+                        <div class="pt-2 space-y-4">
+                            <h3 class="text-xs font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-3 py-1.5 rounded-lg inline-block">About Page Framework</h3>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Main Header Title</label>
+                                <input type="text" name="meta[about_title]" value="<?= htmlspecialchars($curr_settings['about_title'] ?? 'About PageDrop') ?>" required class="w-full bg-slate-50 border border-slate-200 p-3 text-sm rounded-xl outline-none focus:border-blue-500 transition">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Sub-Headline Focus Statement</label>
+                                <input type="text" name="meta[about_subtitle]" value="<?= htmlspecialchars($curr_settings['about_subtitle'] ?? '') ?>" required class="w-full bg-slate-50 border border-slate-200 p-3 text-sm rounded-xl outline-none focus:border-blue-500 transition">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Inner Block Content Title</label>
+                                <input type="text" name="meta[about_content_title]" value="<?= htmlspecialchars($curr_settings['about_content_title'] ?? '') ?>" required class="w-full bg-slate-50 border border-slate-200 p-3 text-sm rounded-xl outline-none focus:border-blue-500 transition">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Detailed Content Text Body (Supports Paragraph Line Breaks)</label>
+                                <textarea name="meta[about_content_body]" rows="6" required class="w-full bg-slate-50 border border-slate-200 p-3 text-sm rounded-xl outline-none focus:border-blue-500 transition regular-text"><?= htmlspecialchars($curr_settings['about_content_body'] ?? '') ?></textarea>
+                            </div>
+                        </div>
+
+                        <div class="pt-4 flex gap-3">
+                            <button type="submit" name="save_settings_trigger" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold p-3.5 rounded-xl text-sm transition shadow-sm">Save Text Modifications</button>
+                            <a href="admin" class="bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold p-3.5 rounded-xl text-sm transition text-center">Return Dashboard</a>
+                        </div>
+                    </form>
+                </div>
+            </main>
+        <?php exit;
+        } ?>
+
+        <?php if ($showMessagesPage) {
+            // Query the incoming contact messages from database index
+            $msg_result = $conn->query("SELECT * FROM contact_messages ORDER BY id DESC");
+        ?>
+            <main class="max-w-6xl mx-auto px-4 py-10">
+                <div class="mb-6 flex justify-between items-center">
+                    <div>
+                        <h2 class="font-extrabold text-2xl text-slate-900 tracking-tight">📥 Incoming Contact Inquiries</h2>
+                        <p class="text-sm text-slate-400 mt-0.5">Read feedback and messages submitted directly from your user base.</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <?php if ($msg_result && $msg_result->num_rows > 0): ?>
+                        <?php while ($msg = $msg_result->fetch_assoc()): ?>
+                            <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs flex flex-col justify-between space-y-4">
+                                <div class="space-y-3">
+                                    <div class="flex justify-between items-start gap-2">
+                                        <div>
+                                            <h4 class="font-bold text-slate-900 leading-tight"><?= htmlspecialchars($msg['name']) ?></h4>
+                                            <a href="mailto:<?= htmlspecialchars($msg['email']) ?>" class="text-xs text-blue-500 hover:underline"><?= htmlspecialchars($msg['email']) ?></a>
+                                        </div>
+                                        <span class="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded-md font-semibold shrink-0">
+                                            Received
+                                        </span>
+                                    </div>
+                                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                        <p class="text-sm text-slate-700 whitespace-pre-line leading-relaxed regular-text"><?= htmlspecialchars($msg['message']) ?></p>
+                                    </div>
+                                </div>
+                                <div class="flex justify-end pt-1">
+                                    <a href="?delete_msg=<?= $msg['id'] ?>" onclick="return confirm('Permanently remove this entry from logs?')" class="text-xs font-semibold text-red-600 hover:bg-red-50 border border-transparent px-3 py-1.5 rounded-lg transition">
+                                        🗑️ Delete Record
+                                    </a>
+                                </div>
+                            </div>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <div class="bg-white border border-slate-200 rounded-2xl p-12 text-center col-span-full">
+                            <p class="text-slate-400 italic font-medium">Your contact inbox is currently empty.</p>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </main>
+        <?php exit;
+        } ?>
 
         <?php if ($showFormPage) { ?>
             <main class="max-w-2xl mx-auto px-4 py-10">
                 <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-xl">
                     <h2 class="font-extrabold text-2xl text-slate-900 mb-6 tracking-tight"><?= $edit ? '✏️ Modify Document Entry' : '✨ Compose Production Entry' ?></h2>
-                    
+
                     <form method="POST" enctype="multipart/form-data" action="admin" class="space-y-5">
                         <input type="hidden" name="blog_id" value="<?= $edit['blog_id'] ?? '' ?>">
-                        
+
                         <div>
                             <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assigned Author</label>
                             <div class="flex gap-2">
@@ -357,7 +514,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
                         <h3 class="text-lg font-bold text-slate-900 mb-1">Author System Management</h3>
                         <p class="text-xs text-slate-500">Add new writers or clear outdated entries instantly from the system index.</p>
                     </div>
-                    
+
                     <form method="POST" action="admin" class="border-b pb-4 mb-4">
                         <input type="hidden" name="current_blog_id" value="<?= $edit['blog_id'] ?? '' ?>">
                         <div class="flex gap-2 items-end">
@@ -365,26 +522,23 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
                                 <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Register New Author</label>
                                 <input type="text" name="new_author_name" required placeholder="e.g., Sarah Jenkins" class="w-full bg-white border border-slate-300 p-2.5 text-sm rounded-xl text-slate-800 outline-none focus:border-blue-500 transition">
                             </div>
-                            <button type="submit" name="quick_add_author" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition h-[42px]">
-                                Add
-                            </button>
+                            <button type="submit" name="quick_add_author" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition h-[42px]">Add</button>
                         </div>
                     </form>
 
                     <div class="flex-1 overflow-y-auto pr-1 space-y-2 mb-4 max-h-[250px]">
                         <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider sticky top-0 bg-white pb-1">Current Active Index</label>
-                        <?php if(!empty($authors_list)): foreach($authors_list as $auth_item): ?>
-                            <div class="flex justify-between items-center bg-slate-50 border p-2 rounded-xl">
-                                <span class="text-sm text-slate-800 pl-2"><?= htmlspecialchars($auth_item['name']) ?></span>
-                                <form method="POST" action="admin" onsubmit="return confirm('Remove this author? All their published blogs will become Unassigned.')">
-                                    <input type="hidden" name="current_blog_id" value="<?= $edit['blog_id'] ?? '' ?>">
-                                    <input type="hidden" name="remove_author_id" value="<?= $auth_item['author_id'] ?>">
-                                    <button type="submit" name="remove_author_trigger" class="text-red-600 hover:text-red-700 hover:bg-red-50 border border-transparent px-2.5 py-1 rounded-lg text-xs font-semibold transition">
-                                        🗑️ Remove
-                                    </button>
-                                </form>
-                            </div>
-                        <?php endforeach; else: ?>
+                        <?php if (!empty($authors_list)): foreach ($authors_list as $auth_item): ?>
+                                <div class="flex justify-between items-center bg-slate-50 border p-2 rounded-xl">
+                                    <span class="text-sm text-slate-800 pl-2"><?= htmlspecialchars($auth_item['name']) ?></span>
+                                    <form method="POST" action="admin" onsubmit="return confirm('Remove this author? All their published blogs will become Unassigned.')">
+                                        <input type="hidden" name="current_blog_id" value="<?= $edit['blog_id'] ?? '' ?>">
+                                        <input type="hidden" name="remove_author_id" value="<?= $auth_item['author_id'] ?>">
+                                        <button type="submit" name="remove_author_trigger" class="text-red-600 hover:text-red-700 hover:bg-red-50 border border-transparent px-2.5 py-1 rounded-lg text-xs font-semibold transition">🗑️ Remove</button>
+                                    </form>
+                                </div>
+                            <?php endforeach;
+                        else: ?>
                             <p class="text-xs text-slate-400 italic text-center py-4">No authors currently indexed.</p>
                         <?php endif; ?>
                     </div>
@@ -407,12 +561,13 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
                     }
                 }
             </script>
-        <?php exit; } ?>
+        <?php exit;
+        } ?>
 
         <main class="max-w-7xl mx-auto p-6 space-y-6">
-            <div class="bg-white p-5 rounded-2xl border flex flex-col sm:flex-row gap-4 items-center justify-between">
+            <div class="bg-white p-5 rounded-2xl border flex flex-col sm:flex-row gap-4 items-center justify-between shadow-xs">
                 <div>
-                    <h3 class="text-lg font-bold text-slate-800">System Logs & Documents</h3>
+                    <h3 class="text-lg font-bold text-slate-800">System Logs & Documents Feed</h3>
                 </div>
                 <form method="GET" action="admin" class="flex gap-2 w-full sm:w-auto">
                     <input type="text" name="search" value="<?= htmlspecialchars($search) ?>" placeholder="Search database index..." class="bg-white border border-slate-300 text-slate-800 pl-4 pr-8 py-2 text-sm rounded-xl outline-none focus:border-blue-500 w-full transition">
@@ -422,36 +577,35 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 <?php if ($result && $result->num_rows > 0) {
-                    while ($row = $result->fetch_assoc()) { 
+                    while ($row = $result->fetch_assoc()) {
                         $all_imgs = explode(',', $row['cover_image']);
                         $preview_img = !empty($all_imgs[0]) ? trim($all_imgs[0]) : '';
                 ?>
-                    <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition duration-150">
-                        <div>
-                            <div class="h-36 bg-slate-50 relative">
-                                <?php if(!empty($preview_img)): ?>
-                                    <img src="../uploads/<?= htmlspecialchars($preview_img) ?>" class="h-full w-full object-cover">
-                                <?php endif; ?>
+                        <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition duration-150">
+                            <div>
+                                <div class="h-36 bg-slate-50 relative">
+                                    <?php if (!empty($preview_img)): ?>
+                                        <img src="../uploads/<?= htmlspecialchars($preview_img) ?>" class="h-full w-full object-cover">
+                                    <?php endif; ?>
+                                </div>
+                                <div class="p-4">
+                                    <h4 class="font-bold text-slate-800 text-sm line-clamp-2 leading-snug"><?= htmlspecialchars($row['title']) ?></h4>
+                                </div>
                             </div>
-                            <div class="p-4">
-                                <h4 class="font-bold text-slate-800 text-sm line-clamp-2 leading-snug"><?= htmlspecialchars($row['title']) ?></h4>
+                            <div class="bg-slate-50 px-4 py-2.5 border-t grid grid-cols-3 gap-2 text-center text-xs font-semibold">
+                                <a href="?view=<?= $row['blog_id'] ?>" class="bg-white border text-slate-600 py-1 rounded-lg hover:bg-slate-100 transition">View</a>
+                                <a href="?edit=<?= $row['blog_id'] ?>" class="bg-blue-50 text-blue-600 py-1 rounded-lg hover:bg-blue-100 transition">Edit</a>
+                                <a href="?delete=<?= $row['blog_id'] ?>" onclick="return confirm('Delete permanently?')" class="bg-red-50 text-red-600 py-1 rounded-lg hover:bg-red-100 transition">Delete</a>
                             </div>
                         </div>
-                        <div class="bg-slate-50 px-4 py-2.5 border-t grid grid-cols-3 gap-2 text-center text-xs font-semibold">
-                            <a href="?view=<?= $row['blog_id'] ?>" class="bg-white border text-slate-600 py-1 rounded-lg hover:bg-slate-100 transition">View</a>
-                            <a href="?edit=<?= $row['blog_id'] ?>" class="bg-blue-50 text-blue-600 py-1 rounded-lg hover:bg-blue-100 transition">Edit</a>
-                            <a href="?delete=<?= $row['blog_id'] ?>" onclick="return confirm('Delete permanently?')" class="bg-red-50 text-red-600 py-1 rounded-lg hover:bg-red-100 transition">Delete</a>
-                        </div>
-                    </div>
-                <?php } } else { echo "<div class='col-span-full text-center py-12 text-slate-400 border border-dashed rounded-2xl italic'>No matching records parsed.</div>"; } ?>
+                    <?php }
+                } else { ?>
+                    <p class="text-slate-400 italic text-center col-span-full py-12 text-sm">No documents found matching criteria.</p>
+                <?php } ?>
             </div>
         </main>
     </div>
 
-    <footer class="bg-slate-900 border-t border-slate-800 text-slate-500 py-6 text-center text-xs font-medium">
-        <div class="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p>&copy; <?= date('Y') ?> PageDrop Systems Enterprise. All rights reserved.</p>
-        </div>
-    </footer>
 </body>
+
 </html>
