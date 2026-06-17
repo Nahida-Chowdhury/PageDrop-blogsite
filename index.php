@@ -17,6 +17,21 @@ if (strpos($request_uri, 'index.php/admin') !== false) {
 $conn = new mysqli("localhost", "root", "", "blog_site");
 if ($conn->connect_error) die("DB Connection Failed");
 
+/* ---------------- AJAX REACTION HANDLER ---------------- */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['react_blog_id'])) {
+    $blog_id = (int)$_POST['react_blog_id'];
+    
+    // Increment the reactions count in the database
+    $conn->query("UPDATE blog SET reactions = reactions + 1 WHERE blog_id = $blog_id");
+    
+    // Fetch updated count to return to frontend
+    $updated = $conn->query("SELECT reactions FROM blog WHERE blog_id = $blog_id")->fetch_assoc();
+    
+    header('Content-Type: application/json');
+    echo json_encode(['success' => true, 'reactions' => $updated['reactions']]);
+    exit;
+}
+
 /* ---------------- FETCH DYNAMIC SITE SETTINGS ---------------- */
 $settings = [];
 $settings_res = $conn->query("SELECT meta_key, meta_value FROM site_settings");
@@ -103,33 +118,34 @@ if (isset($_GET['subject'])) {
 $filter = $_GET['filter'] ?? 'all';
 $search = trim($conn->real_escape_string($_GET['search'] ?? ''));
 
-// 1. Establish pagination parameters
-$limit = 8; 
+// Establish pagination limit from dropdown parameter (Fallback to default: 8)
+$limit = isset($_GET['limit']) ? max(1, (int)$_GET['limit']) : 8; 
 $current_page = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
 $offset = ($current_page - 1) * $limit;
 
-// 2. Build base dynamic query filters
+// Build base dynamic query filters
 $where_clauses = ["1"];
 if ($search != '') {
     $where_clauses[] = "(blog.title LIKE '%$search%' OR blog.subtitle LIKE '%$search%' OR authors.name LIKE '%$search%')";
 }
 $where_sql = implode(" AND ", $where_clauses);
 
-// 3. Determine sorting criteria safely
+// Determine sorting criteria safely
 $order_sql = "ORDER BY blog.upload_time DESC";
 if ($filter === "popular") {
-    $order_sql = "ORDER BY blog.view_count DESC";
+    // CHANGED: Filter by reactions instead of view_count
+    $order_sql = "ORDER BY blog.reactions DESC";
 } elseif ($filter === "recent") {
     $order_sql = "ORDER BY blog.upload_time DESC";
 }
 
-// 4. Calculate total record numbers for layout pagination limits
+// Calculate total record numbers for pagination bounds
 $count_sql = "SELECT COUNT(*) AS total FROM blog LEFT JOIN authors ON blog.author_id = authors.author_id WHERE $where_sql";
 $count_res = $conn->query($count_sql);
 $total_rows = $count_res ? $count_res->fetch_assoc()['total'] : 0;
 $total_pages = ceil($total_rows / $limit);
 
-// 5. Build final tracking query output
+// Build final tracking query output
 $sql = "
 SELECT blog.*, authors.name AS author_name
 FROM blog
@@ -188,17 +204,13 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                 </nav>
             </div>
 
-            <form method="GET" action="index.php" class="w-full md:w-auto flex items-center gap-3 relative">
+            <form method="GET" action="index.php" class="w-full md:w-auto flex items-center gap-3 relative flex-wrap md:flex-nowrap">
                 <?php if($page !== 'home' && $page !== 'view_post' && $page !== 'about' && $page !== 'contact'): ?>
                     <input type="hidden" name="page" value="<?= htmlspecialchars($page) ?>">
                 <?php endif; ?>
 
-                <select name="filter" onchange="this.form.submit()" <?= $is_auth_page ? 'disabled' : '' ?>
-                    class="bg-slate-800 border border-slate-700 text-slate-300 px-3 py-2 text-xs font-bold rounded-xl outline-none focus:border-blue-500 transition disabled:opacity-40 disabled:cursor-not-allowed">
-                    <option value="all" <?= $filter == 'all' ? 'selected' : '' ?>>All Blogs</option>
-                    <option value="recent" <?= $filter == 'recent' ? 'selected' : '' ?>>Recent Posts</option>
-                    <option value="popular" <?= $filter == 'popular' ? 'selected' : '' ?>>Most Popular</option>
-                </select>
+                <input type="hidden" name="filter" value="<?= htmlspecialchars($filter) ?>">
+                <input type="hidden" name="limit" value="<?= htmlspecialchars($limit) ?>">
 
                 <div class="relative w-full sm:w-64">
                     <input type="text" id="searchInput" name="search" value="<?= htmlspecialchars($search) ?>" autocomplete="off" <?= $is_auth_page ? 'disabled' : '' ?>
@@ -261,6 +273,9 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                                 <span class="text-blue-600 font-bold"><?= htmlspecialchars($viewBlog['author_name'] ?? 'Guest Contributor') ?></span>
                             </div>
                             <div class="flex items-center gap-4">
+                                <button type="button" onclick="sendReaction(event, <?= $viewBlog['blog_id'] ?>, 'single-count')" class="flex items-center gap-1 text-rose-500 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-md transition border border-rose-200">
+                                    ❤️ <span id="single-count-<?= $viewBlog['blog_id'] ?>"><?= $viewBlog['reactions'] ?? 0 ?></span>
+                                </button>
                                 <span>👁 <?= $viewBlog['view_count'] ?> Views</span>
                                 <span>📅 <?= date('M d, Y', strtotime($viewBlog['upload_time'])) ?></span>
                             </div>
@@ -414,7 +429,7 @@ $is_auth_page = ($page === 'login' || $page === 'register');
 
         <?php else: ?>
             <?php 
-            $has_interacted = isset($_GET['filter']) || isset($_GET['p']) || !empty($search);
+            $has_interacted = isset($_GET['filter']) || isset($_GET['p']) || isset($_GET['limit']) || !empty($search);
             if (!$has_interacted): 
             ?>
                 <section class="bg-slate-900 text-white py-28 sm:py-36 relative overflow-hidden border-b border-slate-800/80">
@@ -451,11 +466,11 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                                 <span class="text-xs font-mono text-slate-500">pagedrop_core.json</span>
                             </div>
                             <pre class="text-xs sm:text-sm font-mono text-slate-300 leading-relaxed w-full whitespace-pre-wrap break-all"><code>{
-                                <span class="text-blue-400">"status"</span>: <span class="text-emerald-400">"Operational"</span>,
-                                <span class="text-blue-400">"database"</span>: <span class="text-emerald-400">"Connected"</span>,
-                                <span class="text-blue-400">"encryption"</span>: <span class="text-emerald-400">"AES-256"</span>,
-                                <span class="text-blue-400">"cdn_nodes"</span>: ["Edge_Global_01", "Edge_Global_02"],
-                                <span class="text-blue-400">"cache_hit_rate"</span>: <span class="text-amber-400">"99.4%"</span>
+                                "status": "Operational",
+                                "database": "Connected",
+                                "encryption": "AES-256",
+                                "cdn_nodes": ["Edge_Global_01", "Edge_Global_02"],
+                                "cache_hit_rate": "99.4%"
                             }</code></pre>
                         </div>
                     </div>
@@ -463,11 +478,43 @@ $is_auth_page = ($page === 'login' || $page === 'register');
             <?php endif; ?>
 
             <main id="articles" class="max-w-7xl mx-auto p-6 space-y-6 scroll-mt-20">
-                <?php if ($search != ''): ?>
-                    <div class="text-sm font-medium text-slate-500">
-                        Showing results for lookup keyword: <span class="text-slate-800 font-bold">"<?= htmlspecialchars($search) ?>"</span>
+                
+                <div class="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xs">
+                    <div class="text-sm font-bold text-slate-700 tracking-tight">
+                        <?php if ($search != ''): ?>
+                            Search Results for <span class="text-blue-600">"<?= htmlspecialchars($search) ?>"</span>
+                        <?php else: ?>
+                            Discover Publications Catalog
+                        <?php endif; ?>
                     </div>
-                <?php endif; ?>
+
+                    <form method="GET" action="index.php#articles" class="flex items-center gap-3 w-full sm:w-auto justify-end">
+                        <?php if(!empty($search)): ?>
+                            <input type="hidden" name="search" value="<?= htmlspecialchars($search) ?>">
+                        <?php endif; ?>
+
+                        <div class="flex items-center gap-1">
+                            <label class="text-[11px] font-bold uppercase text-slate-400 px-1">Sort By</label>
+                            <select name="filter" onchange="this.form.submit()"
+                                class="bg-slate-50 border border-slate-200 text-slate-700 px-3 py-2 text-xs font-bold rounded-xl outline-none focus:border-blue-500 transition">
+                                <option value="all" <?= $filter == 'all' ? 'selected' : '' ?>>All Blogs</option>
+                                <option value="recent" <?= $filter == 'recent' ? 'selected' : '' ?>>Recent Posts</option>
+                                <option value="popular" <?= $filter == 'popular' ? 'selected' : '' ?>>Popular</option>
+                            </select>
+                        </div>
+
+                        <div class="flex items-center gap-1">
+                            <label class="text-[11px] font-bold uppercase text-slate-400 px-1">Show</label>
+                            <select name="limit" onchange="this.form.submit()"
+                                class="bg-slate-50 border border-slate-200 text-slate-700 px-3 py-2 text-xs font-bold rounded-xl outline-none focus:border-blue-500 transition">
+                                <option value="4" <?= $limit == 4 ? 'selected' : '' ?>>4 Cards</option>
+                                <option value="8" <?= $limit == 8 ? 'selected' : '' ?>>8 Cards</option>
+                                <option value="12" <?= $limit == 12 ? 'selected' : '' ?>>12 Cards</option>
+                                <option value="24" <?= $limit == 24 ? 'selected' : '' ?>>24 Cards</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                     <?php
@@ -476,9 +523,7 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                             $all_imgs = explode(',', $row['cover_image']);
                             $preview_thumb = !empty($all_imgs[0]) ? trim($all_imgs[0]) : '';
                     ?>
-                            <a href="?view=<?= $row['blog_id'] ?>"
-                                class="group block bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
-
+                            <div class="group flex flex-col justify-between bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden hover:shadow-lg transition-all duration-300">
                                 <div>
                                     <div class="h-36 bg-slate-100 relative overflow-hidden">
                                         <?php if (!empty($preview_thumb)): ?>
@@ -486,9 +531,15 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                                                 class="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
                                                 alt="Article Preview">
                                         <?php endif; ?>
-                                        <span class="absolute top-2 right-2 bg-slate-900/70 text-white text-[10px] px-2 py-1 rounded">
-                                            👁 <?= $row['view_count'] ?>
-                                        </span>
+                                        
+                                        <div class="absolute top-2 left-2 flex items-center gap-1">
+                                            <button type="button" onclick="sendReaction(event, <?= $row['blog_id'] ?>, 'card-count')" class="bg-slate-900/80 text-white text-[11px] px-2 py-1 rounded-md font-bold hover:bg-rose-600 transition flex items-center gap-1">
+                                                ❤️ <span id="card-count-<?= $row['blog_id'] ?>"><?= $row['reactions'] ?? 0 ?></span>
+                                            </button>
+                                            <span class="bg-slate-900/70 text-white text-[10px] px-2 py-1 rounded-md">
+                                                👁 <?= $row['view_count'] ?>
+                                            </span>
+                                        </div>
                                     </div>
 
                                     <div class="p-4 space-y-1">
@@ -503,11 +554,11 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                                 </div>
 
                                 <div class="p-4 pt-0">
-                                    <div class="w-full text-center bg-slate-50 group-hover:bg-blue-600 group-hover:text-white text-slate-700 font-bold text-xs py-2.5 rounded-xl transition-all duration-300">
+                                    <a href="?view=<?= $row['blog_id'] ?>" class="block w-full text-center bg-slate-50 group-hover:bg-blue-600 group-hover:text-white text-slate-700 font-bold text-xs py-2.5 rounded-xl transition-all duration-300">
                                         Read Article →
-                                    </div>
+                                    </a>
                                 </div>
-                            </a>
+                            </div>
                     <?php
                         }
                     } else {
@@ -522,6 +573,7 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                         $query_args = [];
                         if (!empty($filter)) $query_args['filter'] = $filter;
                         if (!empty($search)) $query_args['search'] = $search;
+                        if (!empty($limit)) $query_args['limit'] = $limit; 
                         ?>
 
                         <?php if ($current_page > 1): $query_args['p'] = $current_page - 1; ?>
@@ -557,6 +609,30 @@ $is_auth_page = ($page === 'login' || $page === 'register');
     </footer>
 
     <script>
+        /* ---------------- NEW: ASYNCHRONOUS REACTION SCRIPT ---------------- */
+        function sendReaction(event, blogId, outputPrefix) {
+            event.stopPropagation(); // Prevents clicking the button from redirecting the card link
+            
+            const formData = new FormData();
+            formData.append('react_blog_id', blogId);
+
+            fetch('index.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    // Update the clicked counter element instantly
+                    const targetEl = document.getElementById(`${outputPrefix}-${blogId}`);
+                    if(targetEl) {
+                        targetEl.innerText = data.reactions;
+                    }
+                }
+            })
+            .catch(err => console.error("Error logging reaction parameters:", err));
+        }
+
         const input = document.getElementById("searchInput");
         const box = document.getElementById("suggestBox");
         const clearBtn = document.getElementById("clearBtn");
