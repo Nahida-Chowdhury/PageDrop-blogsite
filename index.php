@@ -51,7 +51,7 @@ if (isset($_GET['suggest'])) {
 }
 
 /* ---------------- MULTI-PAGE ROUTER ---------------- */
-$page = $_GET['page'] ?? 'home'; 
+$page = $_GET['page'] ?? 'home';
 
 /* ---------------- VIEW BLOG ---------------- */
 $viewBlog = null;
@@ -66,7 +66,7 @@ if (isset($_GET['view'])) {
         ON blog.author_id = authors.author_id
         WHERE blog.blog_id = $id
     ")->fetch_assoc();
-    $page = 'view_post'; 
+    $page = 'view_post';
 }
 
 /* ---------------- CONTACT FORM SUBMISSION ---------------- */
@@ -75,17 +75,29 @@ if ($page === 'contact' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // Sanitize inbound variables to prevent SQL injections
     $contact_name    = trim($conn->real_escape_string($_POST['contact_name'] ?? ''));
     $contact_email   = trim($conn->real_escape_string($_POST['contact_email'] ?? ''));
+    $contact_subject = trim($conn->real_escape_string($_POST['contact_subject'] ?? ''));
     $contact_message = trim($conn->real_escape_string($_POST['contact_message'] ?? ''));
 
     // Validate that inputs are not blank spaces before running statement
     if (!empty($contact_name) && !empty($contact_email) && !empty($contact_message)) {
-        $insert_sql = "INSERT INTO contact_messages (name, email, message) 
-                       VALUES ('$contact_name', '$contact_email', '$contact_message')";
-        
+        $insert_sql = "INSERT INTO contact_messages (name, email, subject, message)
+            VALUES (
+            '$contact_name',
+            '$contact_email',
+            '$contact_subject',
+            '$contact_message'
+            )";
+
         if ($conn->query($insert_sql)) {
             $contact_success = true;
         }
     }
+}
+
+$contact_subject_prefill = '';
+
+if (isset($_GET['subject'])) {
+    $contact_subject_prefill = htmlspecialchars($_GET['subject']);
 }
 
 /* ---------------- FILTER + SEARCH ---------------- */
@@ -144,7 +156,7 @@ $result = $conn->query($sql);
                         <a href="index.php" class="hover:text-blue-300 transition">PageDrop</a>
                     </h1>
                 </div>
-                
+
                 <nav class="hidden sm:flex items-center gap-5 text-sm font-semibold text-slate-300 ml-4">
                     <a href="index.php" class="hover:text-white transition <?= $page == 'home' ? 'text-blue-400' : '' ?>">Home</a>
                     <a href="index.php?page=about" class="hover:text-white transition <?= $page == 'about' ? 'text-blue-400' : '' ?>">About</a>
@@ -185,7 +197,7 @@ $result = $conn->query($sql);
     </header>
 
     <div class="mb-auto">
-        
+
         <?php if ($page === 'view_post' && $viewBlog): ?>
             <main class="max-w-4xl mx-auto px-4 py-10">
                 <div class="mb-6">
@@ -195,11 +207,11 @@ $result = $conn->query($sql);
                 </div>
 
                 <article class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                    <?php if(!empty($viewBlog['cover_image'])): 
-                        $article_imgs = explode(',', $viewBlog['cover_image']); 
+                    <?php if (!empty($viewBlog['cover_image'])):
+                        $article_imgs = explode(',', $viewBlog['cover_image']);
                     ?>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 p-4 bg-slate-100 border-b">
-                            <?php foreach($article_imgs as $single_img): ?>
+                            <?php foreach ($article_imgs as $single_img): ?>
                                 <div class="overflow-hidden bg-white rounded-2xl h-72">
                                     <img src="uploads/<?= htmlspecialchars(trim($single_img)) ?>" class="w-full h-full object-cover" alt="Cover Image">
                                 </div>
@@ -231,6 +243,24 @@ $result = $conn->query($sql);
                         <div class="text-slate-700 text-base leading-relaxed whitespace-pre-line pt-4">
                             <?= htmlspecialchars($viewBlog['content']) ?>
                         </div>
+
+                        <div class="pt-8 border-t border-slate-200">
+                            <div class="bg-blue-50 border border-blue-100 rounded-2xl p-6 text-center">
+                                <h3 class="text-xl font-bold text-slate-800 mb-2">
+                                    Have Questions About This Article?
+                                </h3>
+
+                                <p class="text-slate-600 mb-4">
+                                    Contact us regarding this blog post.
+                                </p>
+
+                                <a
+                                    href="index.php?page=contact&subject=<?= urlencode($viewBlog['title']) ?>"
+                                    class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-3 rounded-xl transition">
+                                    Contact About This Blog
+                                </a>
+                            </div>
+                        </div>
                     </div>
                 </article>
             </main>
@@ -241,7 +271,7 @@ $result = $conn->query($sql);
                     <h2 class="text-4xl font-extrabold text-slate-900 tracking-tight"><?= htmlspecialchars($about_title) ?></h2>
                     <p class="text-xl text-slate-500 max-w-2xl mx-auto"><?= htmlspecialchars($about_subtitle) ?></p>
                 </div>
-                
+
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center pt-6">
                     <div class="space-y-4">
                         <h3 class="text-2xl font-bold text-slate-800"><?= htmlspecialchars($about_content_title) ?></h3>
@@ -282,11 +312,23 @@ $result = $conn->query($sql);
                             <input type="email" name="contact_email" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition">
                         </div>
                         <div>
+                            <label class="block text-xs font-bold uppercase text-slate-500 mb-1">
+                                Subject
+                            </label>
+
+                            <input
+                                type="text"
+                                name="contact_subject"
+                                value="<?= $contact_subject_prefill ?>"
+                                placeholder="Enter subject"
+                                class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition">
+                        </div>
+                        <div>
                             <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Detailed Inquiry Context</label>
                             <textarea name="contact_message" rows="5" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition resize-none" placeholder="Enter full parameters here..."></textarea>
                         </div>
                         <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition shadow-md">
-                            Dispatch Payload
+                            Send Message
                         </button>
                     </form>
                 </div>
@@ -327,56 +369,67 @@ $result = $conn->query($sql);
                             <span class="text-xs font-mono text-slate-500">pagedrop_core.json</span>
                         </div>
                         <pre class="text-xs sm:text-sm font-mono text-slate-300 leading-relaxed overflow-x-auto"><code>{
-  <span class="text-blue-400">"status"</span>: <span class="text-emerald-400">"Operational"</span>,
-  <span class="text-blue-400">"database"</span>: <span class="text-emerald-400">"Connected"</span>,
-  <span class="text-blue-400">"encryption"</span>: <span class="text-emerald-400">"AES-256"</span>,
-  <span class="text-blue-400">"cdn_nodes"</span>: [
-    <span class="text-indigo-400">"Edge_Global_01"</span>,
-    <span class="text-indigo-400">"Edge_Global_02"</span>
-  ],
-  <span class="text-blue-400">"cache_hit_rate"</span>: <span class="text-amber-400">"99.4%"</span>
-}</code></pre>
+                            <span class="text-blue-400">"status"</span>: <span class="text-emerald-400">"Operational"</span>,
+                            <span class="text-blue-400">"database"</span>: <span class="text-emerald-400">"Connected"</span>,
+                            <span class="text-blue-400">"encryption"</span>: <span class="text-emerald-400">"AES-256"</span>,
+                            <span class="text-blue-400">"cdn_nodes"</span>: [
+                                <span class="text-indigo-400">"Edge_Global_01"</span>,
+                                <span class="text-indigo-400">"Edge_Global_02"</span>
+                            ],
+                            <span class="text-blue-400">"cache_hit_rate"</span>: <span class="text-amber-400">"99.4%"</span>
+                        }</code></pre>
                     </div>
                 </div>
             </section>
 
             <main id="articles" class="max-w-7xl mx-auto p-6 space-y-6 scroll-mt-20">
-                <?php if($search != ''): ?>
+                <?php if ($search != ''): ?>
                     <div class="text-sm font-medium text-slate-500">
                         Showing results for lookup keyword: <span class="text-slate-800 font-bold">"<?= htmlspecialchars($search) ?>"</span>
                     </div>
                 <?php endif; ?>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    <?php 
+                    <?php
                     if ($result && $result->num_rows > 0) {
-                        while ($row = $result->fetch_assoc()) { 
+                        while ($row = $result->fetch_assoc()) {
                             $all_imgs = explode(',', $row['cover_image']);
                             $preview_thumb = !empty($all_imgs[0]) ? trim($all_imgs[0]) : '';
                     ?>
-                        <div class="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition duration-200">
-                            <div>
-                                <div class="h-36 bg-slate-100 relative">
-                                    <?php if(!empty($preview_thumb)): ?>
-                                        <img src="uploads/<?= htmlspecialchars($preview_thumb) ?>" class="h-full w-full object-cover" alt="Article Preview">
-                                    <?php endif; ?>
-                                    <span class="absolute top-2 right-2 bg-slate-900/70 text-white text-[10px] px-2 py-0.5 rounded">👁 <?= $row['view_count'] ?> Views</span>
+                            <a href="?view=<?= $row['blog_id'] ?>"
+                                class="group block bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
+
+                                <div>
+                                    <div class="h-36 bg-slate-100 relative overflow-hidden">
+                                        <?php if (!empty($preview_thumb)): ?>
+                                            <img src="uploads/<?= htmlspecialchars($preview_thumb) ?>"
+                                                class="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                                alt="Article Preview">
+                                        <?php endif; ?>
+                                        <span class="absolute top-2 right-2 bg-slate-900/70 text-white text-[10px] px-2 py-1 rounded">
+                                            👁 <?= $row['view_count'] ?>
+                                        </span>
+                                    </div>
+
+                                    <div class="p-4 space-y-1">
+                                        <h4 class="font-bold text-slate-800 text-sm line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors">
+                                            <?= htmlspecialchars($row['title']) ?>
+                                        </h4>
+                                        <p class="text-xs text-slate-400 line-clamp-1"><?= htmlspecialchars($row['subtitle']) ?></p>
+                                        <p class="text-[11px] font-medium text-slate-400 pt-1">
+                                            By: <span class="text-gray-600 font-semibold"><?= htmlspecialchars($row['author_name'] ?? 'Unknown') ?></span>
+                                        </p>
+                                    </div>
                                 </div>
-                                <div class="p-4 space-y-1">
-                                    <h4 class="font-bold text-slate-800 text-sm line-clamp-2 leading-snug"><?= htmlspecialchars($row['title']) ?></h4>
-                                    <p class="text-xs text-slate-400 line-clamp-1"><?= htmlspecialchars($row['subtitle']) ?></p>
-                                    <p class="text-[11px] font-medium text-slate-400 pt-1">By: <span class="text-blue-600 font-semibold"><?= htmlspecialchars($row['author_name'] ?? 'Unknown') ?></span></p>
+
+                                <div class="p-4 pt-0">
+                                    <div class="w-full text-center bg-slate-50 group-hover:bg-blue-600 group-hover:text-white text-slate-700 font-bold text-xs py-2.5 rounded-xl transition-all duration-300">
+                                        Read Article →
+                                    </div>
                                 </div>
-                            </div>
-                            <div class="p-4 pt-0">
-                                <a href="?view=<?= $row['blog_id'] ?>"
-                                    class="block text-center bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 font-bold text-xs py-2.5 rounded-xl transition duration-150">
-                                    Read Article →
-                                </a>
-                            </div>
-                        </div>
-                    <?php 
-                        } 
+                            </a>
+                    <?php
+                        }
                     } else {
                         echo "<div class='col-span-full bg-white p-12 text-center rounded-2xl border border-slate-200 text-slate-400 font-medium italic'>No matching records found.</div>";
                     }
@@ -420,7 +473,7 @@ $result = $conn->query($sql);
                 .then(res => res.json())
                 .then(data => {
                     box.innerHTML = "";
-                    if(data.length > 0) {
+                    if (data.length > 0) {
                         box.classList.remove("hidden");
                         data.forEach(item => {
                             let div = document.createElement("div");
@@ -456,4 +509,5 @@ $result = $conn->query($sql);
         });
     </script>
 </body>
+
 </html>

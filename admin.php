@@ -434,15 +434,43 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
                                 <div class="space-y-3">
                                     <div class="flex justify-between items-start gap-2">
                                         <div>
-                                            <h4 class="font-bold text-slate-900 leading-tight"><?= htmlspecialchars($msg['name']) ?></h4>
-                                            <a href="mailto:<?= htmlspecialchars($msg['email']) ?>" class="text-xs text-blue-500 hover:underline"><?= htmlspecialchars($msg['email']) ?></a>
+                                            <h4 class="font-bold text-slate-900 leading-tight">
+                                                <?= htmlspecialchars($msg['name']) ?>
+                                            </h4>
+
+                                            <a href="mailto:<?= htmlspecialchars($msg['email']) ?>"
+                                                class="text-xs text-blue-500 hover:underline block">
+                                                <?= htmlspecialchars($msg['email']) ?>
+                                            </a>
+                                            <p class="text-[11px] text-slate-400 mt-1">
+                                                <?= date('d M Y, h:i A', strtotime($msg['submitted_at'])) ?>
+                                            </p>
+
                                         </div>
                                         <span class="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded-md font-semibold shrink-0">
                                             Received
                                         </span>
                                     </div>
-                                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                        <p class="text-sm text-slate-700 whitespace-pre-line leading-relaxed regular-text"><?= htmlspecialchars($msg['message']) ?></p>
+                                    <div class="space-y-3">
+
+                                        <?php if (!empty($msg['subject'])): ?>
+                                            <div class="bg-blue-50 border border-blue-100 p-3 rounded-xl">
+                                                <p class="text-xs uppercase font-bold text-blue-500">
+                                                    Blog Subject
+                                                </p>
+
+                                                <p class="text-sm font-semibold text-blue-700 mt-1">
+                                                    <?= htmlspecialchars($msg['subject']) ?>
+                                                </p>
+                                            </div>
+                                        <?php endif; ?>
+
+                                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                            <p class="text-sm text-slate-700 whitespace-pre-line leading-relaxed">
+                                                <?= htmlspecialchars($msg['message']) ?>
+                                            </p>
+                                        </div>
+
                                     </div>
                                 </div>
                                 <div class="flex justify-end pt-1">
