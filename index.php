@@ -1,4 +1,11 @@
 <?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// 1. Include your external user authentication logic layer
+require_once __DIR__ . '/auth.php';
+
 // ---------------- PATH ROUTER FOR ADMIN ----------------
 $request_uri = $_SERVER['REQUEST_URI'] ?? '';
 if (strpos($request_uri, 'index.php/admin') !== false) {
@@ -72,21 +79,14 @@ if (isset($_GET['view'])) {
 /* ---------------- CONTACT FORM SUBMISSION ---------------- */
 $contact_success = false;
 if ($page === 'contact' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Sanitize inbound variables to prevent SQL injections
     $contact_name    = trim($conn->real_escape_string($_POST['contact_name'] ?? ''));
     $contact_email   = trim($conn->real_escape_string($_POST['contact_email'] ?? ''));
     $contact_subject = trim($conn->real_escape_string($_POST['contact_subject'] ?? ''));
     $contact_message = trim($conn->real_escape_string($_POST['contact_message'] ?? ''));
 
-    // Validate that inputs are not blank spaces before running statement
     if (!empty($contact_name) && !empty($contact_email) && !empty($contact_message)) {
         $insert_sql = "INSERT INTO contact_messages (name, email, subject, message)
-            VALUES (
-            '$contact_name',
-            '$contact_email',
-            '$contact_subject',
-            '$contact_message'
-            )";
+            VALUES ('$contact_name', '$contact_email', '$contact_subject', '$contact_message')";
 
         if ($conn->query($insert_sql)) {
             $contact_success = true;
@@ -95,55 +95,55 @@ if ($page === 'contact' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $contact_subject_prefill = '';
-
 if (isset($_GET['subject'])) {
     $contact_subject_prefill = htmlspecialchars($_GET['subject']);
 }
 
-/* ---------------- FILTER + SEARCH + PAGINATION ---------------- */
+/* ---------------- FILTER, SEARCH + PAGINATION ENGINE ---------------- */
 $filter = $_GET['filter'] ?? 'all';
 $search = trim($conn->real_escape_string($_GET['search'] ?? ''));
 
-// Setup Pagination Variables
-$limit = 8; // Number of blogs shown per page
+// 1. Establish pagination parameters
+$limit = 8; 
 $current_page = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
 $offset = ($current_page - 1) * $limit;
 
-$where_clause = " WHERE 1";
+// 2. Build base dynamic query filters
+$where_clauses = ["1"];
 if ($search != '') {
-    $where_clause .= "
-    AND (
-        blog.title LIKE '%$search%' OR
-        blog.subtitle LIKE '%$search%' OR
-        authors.name LIKE '%$search%'
-    )";
+    $where_clauses[] = "(blog.title LIKE '%$search%' OR blog.subtitle LIKE '%$search%' OR authors.name LIKE '%$search%')";
+}
+$where_sql = implode(" AND ", $where_clauses);
+
+// 3. Determine sorting criteria safely
+$order_sql = "ORDER BY blog.upload_time DESC";
+if ($filter === "popular") {
+    $order_sql = "ORDER BY blog.view_count DESC";
+} elseif ($filter === "recent") {
+    $order_sql = "ORDER BY blog.upload_time DESC";
 }
 
-// Calculate the total rows matching this specific filter configuration
-$count_sql = "SELECT COUNT(*) as total FROM blog LEFT JOIN authors ON blog.author_id = authors.author_id" . $where_clause;
+// 4. Calculate total record numbers for layout pagination limits
+$count_sql = "SELECT COUNT(*) AS total FROM blog LEFT JOIN authors ON blog.author_id = authors.author_id WHERE $where_sql";
 $count_res = $conn->query($count_sql);
 $total_rows = $count_res ? $count_res->fetch_assoc()['total'] : 0;
 $total_pages = ceil($total_rows / $limit);
 
-// Handle ordering directives
-$order_clause = " ORDER BY upload_time DESC";
-if ($filter == "popular") {
-    $order_clause = " ORDER BY view_count DESC";
-} elseif ($filter == "recent") {
-    $order_clause = " ORDER BY upload_time DESC";
-}
-
+// 5. Build final tracking query output
 $sql = "
 SELECT blog.*, authors.name AS author_name
 FROM blog
 LEFT JOIN authors
 ON blog.author_id = authors.author_id
-$where_clause
-$order_clause
+WHERE $where_sql
+$order_sql
 LIMIT $limit OFFSET $offset
 ";
 
 $result = $conn->query($sql);
+
+// Helper state variable to check if form controls should lock out completely
+$is_auth_page = ($page === 'login' || $page === 'register');
 ?>
 
 <!DOCTYPE html>
@@ -172,26 +172,38 @@ $result = $conn->query($sql);
                 </div>
 
                 <nav class="hidden sm:flex items-center gap-5 text-sm font-semibold text-slate-300 ml-4">
-                    <a href="index.php" class="hover:text-white transition <?= $page == 'home' ? 'text-blue-400' : '' ?>">Home</a>
+                    <a href="index.php" class="hover:text-white transition <?= ($page == 'home' && !isset($_GET['page'])) ? 'text-blue-400' : '' ?>">Home</a>
                     <a href="index.php?page=about" class="hover:text-white transition <?= $page == 'about' ? 'text-blue-400' : '' ?>">About</a>
                     <a href="index.php?page=contact" class="hover:text-white transition <?= $page == 'contact' ? 'text-blue-400' : '' ?>">Contact</a>
+                    
+                    <span class="text-slate-600">|</span>
+                    
+                    <?php if (isset($_SESSION['user_logged_in']) && $_SESSION['user_logged_in'] === true): ?>
+                        <span class="text-xs text-slate-400 font-medium">Hello, <strong class="text-white"><?= htmlspecialchars($_SESSION['user_name']) ?></strong></span>
+                        <a href="?user_logout=true" class="text-xs bg-slate-800 hover:bg-red-600 text-white px-3 py-1.5 rounded-xl border border-slate-700 transition">Sign Out</a>
+                    <?php else: ?>
+                        <a href="index.php?page=login" class="hover:text-white transition <?= $page == 'login' ? 'text-blue-400' : '' ?>">Sign In</a>
+                        <a href="index.php?page=register" class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-xl transition shadow-xs">Register</a>
+                    <?php endif; ?>
                 </nav>
             </div>
 
             <form method="GET" action="index.php" class="w-full md:w-auto flex items-center gap-3 relative">
-                <input type="hidden" name="page" value="home">
+                <?php if($page !== 'home' && $page !== 'view_post' && $page !== 'about' && $page !== 'contact'): ?>
+                    <input type="hidden" name="page" value="<?= htmlspecialchars($page) ?>">
+                <?php endif; ?>
 
-                <select name="filter" onchange="this.form.submit()"
-                    class="bg-slate-800 border border-slate-700 text-slate-300 px-3 py-2 text-xs font-bold rounded-xl outline-none cursor-pointer focus:border-blue-500 transition">
+                <select name="filter" onchange="this.form.submit()" <?= $is_auth_page ? 'disabled' : '' ?>
+                    class="bg-slate-800 border border-slate-700 text-slate-300 px-3 py-2 text-xs font-bold rounded-xl outline-none focus:border-blue-500 transition disabled:opacity-40 disabled:cursor-not-allowed">
                     <option value="all" <?= $filter == 'all' ? 'selected' : '' ?>>All Blogs</option>
                     <option value="recent" <?= $filter == 'recent' ? 'selected' : '' ?>>Recent Posts</option>
                     <option value="popular" <?= $filter == 'popular' ? 'selected' : '' ?>>Most Popular</option>
                 </select>
 
                 <div class="relative w-full sm:w-64">
-                    <input type="text" id="searchInput" name="search" value="<?= htmlspecialchars($search) ?>" autocomplete="off"
+                    <input type="text" id="searchInput" name="search" value="<?= htmlspecialchars($search) ?>" autocomplete="off" <?= $is_auth_page ? 'disabled' : '' ?>
                         placeholder="Search articles, authors..."
-                        class="bg-slate-800 border border-slate-700 text-white text-sm pl-4 pr-8 py-2 rounded-xl outline-none focus:border-blue-500 w-full transition placeholder-slate-500">
+                        class="bg-slate-800 border border-slate-700 text-white text-sm pl-4 pr-8 py-2 rounded-xl outline-none focus:border-blue-500 w-full transition placeholder-slate-500 disabled:opacity-40 disabled:cursor-not-allowed">
 
                     <span id="clearBtn"
                         class="hidden absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-slate-400 hover:text-red-400 font-bold text-lg">
@@ -203,7 +215,7 @@ $result = $conn->query($sql);
                     </div>
                 </div>
 
-                <button class="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-5 py-2 rounded-xl transition shadow-sm">
+                <button <?= $is_auth_page ? 'disabled' : '' ?> class="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-5 py-2 rounded-xl transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
                     Search
                 </button>
             </form>
@@ -260,16 +272,9 @@ $result = $conn->query($sql);
 
                         <div class="pt-8 border-t border-slate-200">
                             <div class="bg-blue-50 border border-blue-100 rounded-2xl p-6 text-center">
-                                <h3 class="text-xl font-bold text-slate-800 mb-2">
-                                    Have Questions About This Article?
-                                </h3>
-
-                                <p class="text-slate-600 mb-4">
-                                    Contact us regarding this blog post.
-                                </p>
-
-                                <a
-                                    href="index.php?page=contact&subject=<?= urlencode($viewBlog['title']) ?>"
+                                <h3 class="text-xl font-bold text-slate-800 mb-2">Have Questions About This Article?</h3>
+                                <p class="text-slate-600 mb-4">Contact us regarding this blog post.</p>
+                                <a href="index.php?page=contact&subject=<?= urlencode($viewBlog['title']) ?>"
                                     class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-3 rounded-xl transition">
                                     Contact About This Blog
                                 </a>
@@ -312,7 +317,7 @@ $result = $conn->query($sql);
 
                     <?php if ($contact_success): ?>
                         <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-xl text-sm font-medium">
-                            🎉 Success! Message package processed successfully. Our support desk will reach out shortly.
+                            🎉 Success! Message processed successfully. Our support desk will reach out shortly.
                         </div>
                     <?php endif; ?>
 
@@ -326,16 +331,8 @@ $result = $conn->query($sql);
                             <input type="email" name="contact_email" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition">
                         </div>
                         <div>
-                            <label class="block text-xs font-bold uppercase text-slate-500 mb-1">
-                                Subject
-                            </label>
-
-                            <input
-                                type="text"
-                                name="contact_subject"
-                                value="<?= $contact_subject_prefill ?>"
-                                placeholder="Enter subject"
-                                class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition">
+                            <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subject</label>
+                            <input type="text" name="contact_subject" value="<?= $contact_subject_prefill ?>" placeholder="Enter subject" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition">
                         </div>
                         <div>
                             <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Detailed Inquiry Context</label>
@@ -348,15 +345,77 @@ $result = $conn->query($sql);
                 </div>
             </main>
 
-<?php else: ?>
-            <?php 
-            // Detect if the user explicitly interacted with pagination or filters
-            $has_clicked_pagination = isset($_GET['p']);
-            $has_clicked_filter = isset($_GET['filter']);
+        <?php elseif ($page === 'login'): ?>
+            <main class="max-w-md mx-auto px-4 py-16">
+                <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-xl space-y-6">
+                    <div class="text-center">
+                        <h2 class="text-2xl font-black text-slate-900 tracking-tight">Welcome Back</h2>
+                        <p class="text-xs text-slate-400 mt-1">Access your member account directly</p>
+                    </div>
 
-            // ONLY show the massive Hero block if the user just arrived at the site 
-            // (No search keyword, and they haven't explicitly clicked a page or filter button)
-            if (empty($search) && !$has_clicked_pagination && !$has_clicked_filter): 
+                    <?php if (!empty($auth_error)): ?>
+                        <div class="bg-red-50 border border-red-200 text-red-700 text-xs font-bold p-3 rounded-xl text-center"><?= $auth_error ?></div>
+                    <?php endif; ?>
+                    <?php if (!empty($auth_success)): ?>
+                        <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold p-3 rounded-xl text-center"><?= $auth_success ?></div>
+                    <?php endif; ?>
+
+                    <form method="POST" action="index.php?page=login" class="space-y-4" autocomplete="off">
+                        <div>
+                            <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Email Destination</label>
+                            <input type="email" name="login_email" required placeholder="name@domain.com" autocomplete="username" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Password</label>
+                            <input type="password" name="login_pass" required placeholder="••••••••" autocomplete="new-password" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition">
+                        </div>
+                        <button type="submit" name="login_trigger" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition shadow-md">Sign In</button>
+                    </form>
+
+                    <p class="text-center text-xs text-slate-400">Don't have an account? <a href="index.php?page=register" class="text-blue-500 font-bold hover:underline">Register here</a></p>
+                </div>
+            </main>
+
+        <?php elseif ($page === 'register'): ?>
+            <main class="max-w-md mx-auto px-4 py-16">
+                <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-xl space-y-6">
+                    <div class="text-center">
+                        <h2 class="text-2xl font-black text-slate-900 tracking-tight">Create User Account</h2>
+                        <p class="text-xs text-slate-400 mt-1">Register to join the publication network</p>
+                    </div>
+
+                    <?php if (!empty($auth_error)): ?>
+                        <div class="bg-red-50 border border-red-200 text-red-700 text-xs font-bold p-3 rounded-xl text-center"><?= $auth_error ?></div>
+                    <?php endif; ?>
+
+                    <form method="POST" action="index.php?page=register" class="space-y-4" autocomplete="off">
+                        <div>
+                            <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Full Name</label>
+                            <input type="text" name="reg_name" required placeholder="e.g. John Doe" autocomplete="name" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Email Address</label>
+                            <input type="email" name="reg_email" required placeholder="name@domain.com" autocomplete="email" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Password</label>
+                            <input type="password" name="reg_pass" required placeholder="Minimum 6 characters" autocomplete="new-password" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Confirm Password</label>
+                            <input type="password" name="reg_conf_pass" required placeholder="Confirm credentials" autocomplete="new-password" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 transition">
+                        </div>
+                        <button type="submit" name="register_trigger" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition shadow-md">Complete Registration</button>
+                    </form>
+
+                    <p class="text-center text-xs text-slate-400">Already registered? <a href="index.php?page=login" class="text-blue-500 font-bold hover:underline">Log in instead</a></p>
+                </div>
+            </main>
+
+        <?php else: ?>
+            <?php 
+            $has_interacted = isset($_GET['filter']) || isset($_GET['p']) || !empty($search);
+            if (!$has_interacted): 
             ?>
                 <section class="bg-slate-900 text-white py-28 sm:py-36 relative overflow-hidden border-b border-slate-800/80">
                     <div class="absolute top-1/2 left-1/4 -translate-y-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -373,7 +432,7 @@ $result = $conn->query($sql);
                                 <?= htmlspecialchars($hero_subtitle) ?>
                             </p>
                             <div class="flex items-center gap-5 pt-2">
-                                <a href="#articles" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-7 py-3.5 rounded-xl transition shadow-md hover:shadow-blue-600/20 hover:-translate-y-0.5 transform duration-150">
+                                <a href="#articles" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-7 py-3.5 rounded-xl transition shadow-md">
                                     Explore Articles
                                 </a>
                                 <a href="index.php?page=about" class="text-slate-300 hover:text-white text-sm font-semibold transition flex items-center gap-1.5 group">
@@ -382,7 +441,7 @@ $result = $conn->query($sql);
                             </div>
                         </div>
 
-                        <div class="hidden md:block bg-slate-950/60 border border-slate-800/80 rounded-3xl p-7 shadow-2xl backdrop-blur-xs max-w-lg justify-self-end w-full">
+                        <div class="hidden md:block bg-slate-950/60 border border-slate-800/80 rounded-3xl p-7 shadow-2xl backdrop-blur-xs max-w-lg justify-self-end w-full min-w-0">
                             <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-5">
                                 <div class="flex items-center gap-2">
                                     <span class="w-3 h-3 rounded-full bg-red-500/80"></span>
@@ -391,14 +450,11 @@ $result = $conn->query($sql);
                                 </div>
                                 <span class="text-xs font-mono text-slate-500">pagedrop_core.json</span>
                             </div>
-                            <pre class="text-xs sm:text-sm font-mono text-slate-300 leading-relaxed overflow-x-auto"><code>{
+                            <pre class="text-xs sm:text-sm font-mono text-slate-300 leading-relaxed w-full whitespace-pre-wrap break-all"><code>{
                                 <span class="text-blue-400">"status"</span>: <span class="text-emerald-400">"Operational"</span>,
                                 <span class="text-blue-400">"database"</span>: <span class="text-emerald-400">"Connected"</span>,
                                 <span class="text-blue-400">"encryption"</span>: <span class="text-emerald-400">"AES-256"</span>,
-                                <span class="text-blue-400">"cdn_nodes"</span>: [
-                                    <span class="text-indigo-400">"Edge_Global_01"</span>,
-                                    <span class="text-indigo-400">"Edge_Global_02"</span>
-                                ],
+                                <span class="text-blue-400">"cdn_nodes"</span>: ["Edge_Global_01", "Edge_Global_02"],
                                 <span class="text-blue-400">"cache_hit_rate"</span>: <span class="text-amber-400">"99.4%"</span>
                             }</code></pre>
                         </div>
@@ -461,47 +517,27 @@ $result = $conn->query($sql);
                 </div>
 
                 <?php if ($total_pages > 1): ?>
-                    <div class="flex items-center justify-between border-t border-slate-200 bg-white px-4 py-4 sm:px-6 rounded-2xl shadow-xs mt-6">
-                        <div class="flex flex-1 justify-between sm:hidden">
-                            <?php if ($current_page > 1): ?>
-                                <a href="?p=<?= $current_page - 1 ?>&filter=<?= $filter ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Previous</a>
-                            <?php else: ?>
-                                <div></div>
-                            <?php endif; ?>
-                            <?php if ($current_page < $total_pages): ?>
-                                <a href="?p=<?= $current_page + 1 ?>&filter=<?= $filter ?>&search=<?= urlencode($search) ?>" class="relative ml-3 inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Next</a>
-                            <?php endif; ?>
-                        </div>
-                        <div class="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
-                            <div>
-                                <p class="text-sm text-slate-700">
-                                    Showing <span class="font-semibold"><?= $offset + 1 ?></span> to <span class="font-semibold"><?= min($offset + $limit, $total_rows) ?></span> of <span class="font-semibold"><?= $total_rows ?></span> results
-                                </p>
-                            </div>
-                            <div>
-                                <nav class="isolate inline-flex -space-x-px rounded-xl shadow-xs gap-1" aria-label="Pagination">
-                                    <?php if ($current_page > 1): ?>
-                                        <a href="?p=<?= $current_page - 1 ?>&filter=<?= $filter ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl px-2 py-2 text-slate-400 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 focus:z-20">
-                                            <span class="sr-only">Previous</span>
-                                            &larr;
-                                        </a>
-                                    <?php endif; ?>
+                    <div class="flex items-center justify-center pt-8 border-t border-slate-200 gap-2">
+                        <?php 
+                        $query_args = [];
+                        if (!empty($filter)) $query_args['filter'] = $filter;
+                        if (!empty($search)) $query_args['search'] = $search;
+                        ?>
 
-                                    <?php for ($i = 1; $i <= $total_pages; $i++): ?>
-                                        <a href="?p=<?= $i ?>&filter=<?= $filter ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl px-4 py-2 text-sm font-semibold <?= $i === $current_page ? 'bg-blue-600 text-white focus:z-20' : 'text-slate-900 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 focus:z-20' ?>">
-                                            <?= $i ?>
-                                        </a>
-                                    <?php endfor; ?>
+                        <?php if ($current_page > 1): $query_args['p'] = $current_page - 1; ?>
+                            <a href="?<?= http_build_query($query_args) ?>#articles" class="bg-white border border-slate-200 hover:border-blue-500 text-slate-600 font-bold px-3 py-2 rounded-xl text-xs transition shadow-xs">← Previous</a>
+                        <?php endif; ?>
 
-                                    <?php if ($current_page < $total_pages): ?>
-                                        <a href="?p=<?= $current_page + 1 ?>&filter=<?= $filter ?>&search=<?= urlencode($search) ?>" class="relative inline-flex items-center rounded-xl px-2 py-2 text-slate-400 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 focus:z-20">
-                                            <span class="sr-only">Next</span>
-                                            &rarr;
-                                        </a>
-                                    <?php endif; ?>
-                                </nav>
-                            </div>
-                        </div>
+                        <?php for ($i = 1; $i <= $total_pages; $i++): $query_args['p'] = $i; ?>
+                            <a href="?<?= http_build_query($query_args) ?>#articles" 
+                                class="px-3.5 py-2 rounded-xl text-xs font-bold border transition shadow-xs <?= $i === $current_page ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 hover:border-blue-500 text-slate-600' ?>">
+                                <?= $i ?>
+                            </a>
+                        <?php endfor; ?>
+
+                        <?php if ($current_page < $total_pages): $query_args['p'] = $current_page + 1; ?>
+                            <a href="?<?= http_build_query($query_args) ?>#articles" class="bg-white border border-slate-200 hover:border-blue-500 text-slate-600 font-bold px-3 py-2 rounded-xl text-xs transition shadow-xs">Next →</a>
+                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
             </main>
@@ -525,53 +561,61 @@ $result = $conn->query($sql);
         const box = document.getElementById("suggestBox");
         const clearBtn = document.getElementById("clearBtn");
 
-        input.addEventListener("input", function() {
-            if (this.value.length > 0) {
-                clearBtn.classList.remove("hidden");
-            } else {
-                clearBtn.classList.add("hidden");
-            }
+        if(input && input.value.length > 0) {
+            clearBtn.classList.remove("hidden");
+        }
 
-            if (this.value.length < 1) {
+        if (input && !input.disabled) {
+            input.addEventListener("input", function() {
+                if (this.value.length > 0) {
+                    clearBtn.classList.remove("hidden");
+                } else {
+                    clearBtn.classList.add("hidden");
+                }
+
+                if (this.value.length < 1) {
+                    box.innerHTML = "";
+                    box.classList.add("hidden");
+                    return;
+                }
+
+                fetch("?suggest=" + encodeURIComponent(this.value))
+                    .then(res => res.json())
+                    .then(data => {
+                        box.innerHTML = "";
+                        if (data.length > 0) {
+                            box.classList.remove("hidden");
+                            data.forEach(item => {
+                                let div = document.createElement("div");
+                                div.innerText = item;
+                                div.className = "px-4 py-2 text-xs font-medium text-slate-300 cursor-pointer hover:bg-slate-700/60 border-b border-slate-700/50 last:border-b-0 text-left transition";
+                                div.onclick = function() {
+                                    input.value = item;
+                                    box.innerHTML = "";
+                                    box.classList.add("hidden");
+                                    input.form.submit();
+                                };
+                                box.appendChild(div);
+                            });
+                        } else {
+                            box.classList.add("hidden");
+                        }
+                    });
+            });
+        }
+
+        if (clearBtn) {
+            clearBtn.addEventListener("click", function() {
+                input.value = "";
                 box.innerHTML = "";
                 box.classList.add("hidden");
-                return;
-            }
-
-            fetch("?suggest=" + encodeURIComponent(this.value))
-                .then(res => res.json())
-                .then(data => {
-                    box.innerHTML = "";
-                    if (data.length > 0) {
-                        box.classList.remove("hidden");
-                        data.forEach(item => {
-                            let div = document.createElement("div");
-                            div.innerText = item;
-                            div.className = "px-4 py-2 text-xs font-medium text-slate-300 cursor-pointer hover:bg-slate-700/60 border-b border-slate-700/50 last:border-b-0 text-left transition";
-                            div.onclick = function() {
-                                input.value = item;
-                                box.innerHTML = "";
-                                box.classList.add("hidden");
-                                input.form.submit();
-                            };
-                            box.appendChild(div);
-                        });
-                    } else {
-                        box.classList.add("hidden");
-                    }
-                });
-        });
-
-        clearBtn.addEventListener("click", function() {
-            input.value = "";
-            box.innerHTML = "";
-            box.classList.add("hidden");
-            clearBtn.classList.add("hidden");
-            window.location.href = "index.php";
-        });
+                clearBtn.classList.add("hidden");
+                window.location.href = "index.php";
+            });
+        }
 
         document.addEventListener("click", function(e) {
-            if (!input.contains(e.target) && !box.contains(e.target)) {
+            if (input && box && !input.contains(e.target) && !box.contains(e.target)) {
                 box.innerHTML = "";
                 box.classList.add("hidden");
             }
