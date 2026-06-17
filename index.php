@@ -89,7 +89,7 @@ $result = $conn->query($sql);
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 
-<body class="bg-stone-100 min-h-screen font-sans flex flex-col justify-between">
+<body class="bg-slate-50 min-h-screen font-sans flex flex-col justify-between text-slate-800">
 
     <header class="bg-slate-900 text-white shadow-md sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row gap-4 md:gap-0 items-center justify-between">
@@ -146,9 +146,15 @@ $result = $conn->query($sql);
                 </div>
 
                 <article class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                    <?php if(!empty($viewBlog['cover_image'])): ?>
-                        <div class="w-full max-h-[450px] overflow-hidden bg-slate-100">
-                            <img src="uploads/<?= htmlspecialchars($viewBlog['cover_image']) ?>" class="w-full h-full object-cover">
+                    <?php if(!empty($viewBlog['cover_image'])): 
+                        $article_imgs = explode(',', $viewBlog['cover_image']); 
+                    ?>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 p-4 bg-slate-100 border-b">
+                            <?php foreach($article_imgs as $single_img): ?>
+                                <div class="overflow-hidden bg-white rounded-2xl h-72">
+                                    <img src="uploads/<?= htmlspecialchars(trim($single_img)) ?>" class="w-full h-full object-cover">
+                                </div>
+                            <?php endforeach; ?>
                         </div>
                     <?php endif; ?>
 
@@ -194,12 +200,15 @@ $result = $conn->query($sql);
                     <?php 
                     if ($result && $result->num_rows > 0) {
                         while ($row = $result->fetch_assoc()) { 
+                            // FIX: Extract the very first image to use as the card preview
+                            $all_imgs = explode(',', $row['cover_image']);
+                            $preview_thumb = !empty($all_imgs[0]) ? trim($all_imgs[0]) : '';
                     ?>
                         <div class="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition duration-200">
                             <div>
                                 <div class="h-36 bg-slate-100 relative">
-                                    <?php if(!empty($row['cover_image'])): ?>
-                                        <img src="uploads/<?= htmlspecialchars($row['cover_image']) ?>" class="h-full w-full object-cover">
+                                    <?php if(!empty($preview_thumb)): ?>
+                                        <img src="uploads/<?= htmlspecialchars($preview_thumb) ?>" class="h-full w-full object-cover">
                                     <?php endif; ?>
                                     <span class="absolute top-2 right-2 bg-slate-900/70 text-white text-[10px] px-2 py-0.5 rounded">👁 <?= $row['view_count'] ?> Views</span>
                                 </div>
