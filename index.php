@@ -20,13 +20,28 @@ if ($conn->connect_error) die("DB Connection Failed");
 /* ---------------- AJAX REACTION HANDLER ---------------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['react_blog_id'])) {
     $blog_id = (int)$_POST['react_blog_id'];
-    
+
+    // Initialize the tracking array if it doesn't exist yet
+    if (!isset($_SESSION['reacted_posts'])) {
+        $_SESSION['reacted_posts'] = [];
+    }
+
+    // Check if this blog post ID is already inside the session array
+    if (in_array($blog_id, $_SESSION['reacted_posts'])) {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'error' => 'already_reacted']);
+        exit;
+    }
+
     // Increment the reactions count in the database
     $conn->query("UPDATE blog SET reactions = reactions + 1 WHERE blog_id = $blog_id");
-    
+
+    // Remember that this session has now reacted to this blog post
+    $_SESSION['reacted_posts'][] = $blog_id;
+
     // Fetch updated count to return to frontend
     $updated = $conn->query("SELECT reactions FROM blog WHERE blog_id = $blog_id")->fetch_assoc();
-    
+
     header('Content-Type: application/json');
     echo json_encode(['success' => true, 'reactions' => $updated['reactions']]);
     exit;
@@ -119,7 +134,7 @@ $filter = $_GET['filter'] ?? 'all';
 $search = trim($conn->real_escape_string($_GET['search'] ?? ''));
 
 // Establish pagination limit from dropdown parameter (Fallback to default: 8)
-$limit = isset($_GET['limit']) ? max(1, (int)$_GET['limit']) : 8; 
+$limit = isset($_GET['limit']) ? max(1, (int)$_GET['limit']) : 8;
 $current_page = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
 $offset = ($current_page - 1) * $limit;
 
@@ -191,9 +206,9 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                     <a href="index.php" class="hover:text-white transition <?= ($page == 'home' && !isset($_GET['page'])) ? 'text-blue-400' : '' ?>">Home</a>
                     <a href="index.php?page=about" class="hover:text-white transition <?= $page == 'about' ? 'text-blue-400' : '' ?>">About</a>
                     <a href="index.php?page=contact" class="hover:text-white transition <?= $page == 'contact' ? 'text-blue-400' : '' ?>">Contact</a>
-                    
+
                     <span class="text-slate-600">|</span>
-                    
+
                     <?php if (isset($_SESSION['user_logged_in']) && $_SESSION['user_logged_in'] === true): ?>
                         <span class="text-xs text-slate-400 font-medium">Hello, <strong class="text-white"><?= htmlspecialchars($_SESSION['user_name']) ?></strong></span>
                         <a href="?user_logout=true" class="text-xs bg-slate-800 hover:bg-red-600 text-white px-3 py-1.5 rounded-xl border border-slate-700 transition">Sign Out</a>
@@ -205,7 +220,7 @@ $is_auth_page = ($page === 'login' || $page === 'register');
             </div>
 
             <form method="GET" action="index.php" class="w-full md:w-auto flex items-center gap-3 relative flex-wrap md:flex-nowrap">
-                <?php if($page !== 'home' && $page !== 'view_post' && $page !== 'about' && $page !== 'contact'): ?>
+                <?php if ($page !== 'home' && $page !== 'view_post' && $page !== 'about' && $page !== 'contact'): ?>
                     <input type="hidden" name="page" value="<?= htmlspecialchars($page) ?>">
                 <?php endif; ?>
 
@@ -428,9 +443,9 @@ $is_auth_page = ($page === 'login' || $page === 'register');
             </main>
 
         <?php else: ?>
-            <?php 
+            <?php
             $has_interacted = isset($_GET['filter']) || isset($_GET['p']) || isset($_GET['limit']) || !empty($search);
-            if (!$has_interacted): 
+            if (!$has_interacted):
             ?>
                 <section class="bg-slate-900 text-white py-28 sm:py-36 relative overflow-hidden border-b border-slate-800/80">
                     <div class="absolute top-1/2 left-1/4 -translate-y-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -478,7 +493,7 @@ $is_auth_page = ($page === 'login' || $page === 'register');
             <?php endif; ?>
 
             <main id="articles" class="max-w-7xl mx-auto p-6 space-y-6 scroll-mt-20">
-                
+
                 <div class="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xs">
                     <div class="text-sm font-bold text-slate-700 tracking-tight">
                         <?php if ($search != ''): ?>
@@ -489,7 +504,7 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                     </div>
 
                     <form method="GET" action="index.php#articles" class="flex items-center gap-3 w-full sm:w-auto justify-end">
-                        <?php if(!empty($search)): ?>
+                        <?php if (!empty($search)): ?>
                             <input type="hidden" name="search" value="<?= htmlspecialchars($search) ?>">
                         <?php endif; ?>
 
@@ -531,7 +546,7 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                                                 class="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
                                                 alt="Article Preview">
                                         <?php endif; ?>
-                                        
+
                                         <div class="absolute top-2 left-2 flex items-center gap-1">
                                             <button type="button" onclick="sendReaction(event, <?= $row['blog_id'] ?>, 'card-count')" class="bg-slate-900/80 text-white text-[11px] px-2 py-1 rounded-md font-bold hover:bg-rose-600 transition flex items-center gap-1">
                                                 ❤️ <span id="card-count-<?= $row['blog_id'] ?>"><?= $row['reactions'] ?? 0 ?></span>
@@ -569,11 +584,11 @@ $is_auth_page = ($page === 'login' || $page === 'register');
 
                 <?php if ($total_pages > 1): ?>
                     <div class="flex items-center justify-center pt-8 border-t border-slate-200 gap-2">
-                        <?php 
+                        <?php
                         $query_args = [];
                         if (!empty($filter)) $query_args['filter'] = $filter;
                         if (!empty($search)) $query_args['search'] = $search;
-                        if (!empty($limit)) $query_args['limit'] = $limit; 
+                        if (!empty($limit)) $query_args['limit'] = $limit;
                         ?>
 
                         <?php if ($current_page > 1): $query_args['p'] = $current_page - 1; ?>
@@ -581,7 +596,7 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                         <?php endif; ?>
 
                         <?php for ($i = 1; $i <= $total_pages; $i++): $query_args['p'] = $i; ?>
-                            <a href="?<?= http_build_query($query_args) ?>#articles" 
+                            <a href="?<?= http_build_query($query_args) ?>#articles"
                                 class="px-3.5 py-2 rounded-xl text-xs font-bold border transition shadow-xs <?= $i === $current_page ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200 hover:border-blue-500 text-slate-600' ?>">
                                 <?= $i ?>
                             </a>
@@ -612,32 +627,33 @@ $is_auth_page = ($page === 'login' || $page === 'register');
         /* ---------------- NEW: ASYNCHRONOUS REACTION SCRIPT ---------------- */
         function sendReaction(event, blogId, outputPrefix) {
             event.stopPropagation(); // Prevents clicking the button from redirecting the card link
-            
+
             const formData = new FormData();
             formData.append('react_blog_id', blogId);
 
             fetch('index.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    // Update the clicked counter element instantly
-                    const targetEl = document.getElementById(`${outputPrefix}-${blogId}`);
-                    if(targetEl) {
-                        targetEl.innerText = data.reactions;
+                    method: 'POST',
+                    body: formData
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update the clicked counter element instantly
+                        const targetEl = document.getElementById(`${outputPrefix}-${blogId}`);
+                        if (targetEl) {
+                            targetEl.innerText = data.reactions;
+                        }
+                    } else if (data.error === 'already_reacted') {
+                        alert("You have already reacted to this post!");
                     }
-                }
-            })
-            .catch(err => console.error("Error logging reaction parameters:", err));
+                })
+                .catch(err => console.error("Error logging reaction parameters:", err));
         }
-
         const input = document.getElementById("searchInput");
         const box = document.getElementById("suggestBox");
         const clearBtn = document.getElementById("clearBtn");
 
-        if(input && input.value.length > 0) {
+        if (input && input.value.length > 0) {
             clearBtn.classList.remove("hidden");
         }
 
