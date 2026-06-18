@@ -481,12 +481,15 @@ $is_auth_page = ($page === 'login' || $page === 'register');
                                 <span class="text-xs font-mono text-slate-500">pagedrop_core.json</span>
                             </div>
                             <pre class="text-xs sm:text-sm font-mono text-slate-300 leading-relaxed w-full whitespace-pre-wrap break-all"><code>{
-                                "status": "Operational",
-                                "database": "Connected",
-                                "encryption": "AES-256",
-                                "cdn_nodes": ["Edge_Global_01", "Edge_Global_02"],
-                                "cache_hit_rate": "99.4%"
-                            }</code></pre>
+    <span class="text-blue-400">"status"</span>: <span class="text-emerald-400">"Operational"</span>,
+    <span class="text-blue-400">"database"</span>: <span class="text-emerald-400">"Connected"</span>,
+    <span class="text-blue-400">"encryption"</span>: <span class="text-emerald-400">"AES-256"</span>,
+    <span class="text-blue-400">"cdn_nodes"</span>: [
+        <span class="text-indigo-400">"Edge_Global_01"</span>,
+        <span class="text-indigo-400">"Edge_Global_02"</span>
+    ],
+    <span class="text-blue-400">"cache_hit_rate"</span>: <span class="text-amber-400">"99.4%"</span>
+}</code></pre>
                         </div>
                     </div>
                 </section>
