@@ -133,6 +133,4 @@ xampp/htdocs/PageDrop
 
 **Nahida Chowdhury**
 
-B.Sc. in Software Engineering
-
-Metropolitan University
+Software Developer Intern
